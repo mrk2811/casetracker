@@ -170,6 +170,26 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
         """)
 
+        # Migration: add new columns to existing cases table if they don't exist
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
+        migrations = [
+            ("priority", "ALTER TABLE cases ADD COLUMN priority TEXT DEFAULT 'normal'"),
+            ("source", "ALTER TABLE cases ADD COLUMN source TEXT DEFAULT 'manual'"),
+            ("last_checked_at", "ALTER TABLE cases ADD COLUMN last_checked_at TIMESTAMP"),
+            ("last_source", "ALTER TABLE cases ADD COLUMN last_source TEXT"),
+            ("verified", "ALTER TABLE cases ADD COLUMN verified INTEGER DEFAULT 0"),
+            ("search_params", "ALTER TABLE cases ADD COLUMN search_params TEXT"),
+            ("court_system", "ALTER TABLE cases ADD COLUMN court_system TEXT"),
+        ]
+        for col_name, alter_sql in migrations:
+            if col_name not in existing_cols:
+                conn.execute(alter_sql)
+
+        # Migration: add source column to appearances if missing
+        app_cols = {row[1] for row in conn.execute("PRAGMA table_info(appearances)").fetchall()}
+        if "source" not in app_cols:
+            conn.execute("ALTER TABLE appearances ADD COLUMN source TEXT DEFAULT 'manual'")
+
         # Seed default court configurations
         conn.execute("""
             INSERT OR IGNORE INTO court_configs (state, court_system, display_name, base_url, adapter_class)
