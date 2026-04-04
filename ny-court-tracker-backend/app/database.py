@@ -34,6 +34,7 @@ def get_db():
 
 def init_db():
     with get_db() as conn:
+        # Step 1: Create tables (without new columns that might conflict with existing tables)
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,7 +61,7 @@ def init_db():
                 justice TEXT,
                 part TEXT,
                 notes TEXT,
-                priority TEXT DEFAULT 'normal' CHECK(priority IN ('normal', 'high')),
+                priority TEXT DEFAULT 'normal',
                 source TEXT DEFAULT 'manual',
                 last_checked_at TIMESTAMP,
                 last_source TEXT,
@@ -157,20 +158,9 @@ def init_db():
                 FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE SET NULL,
                 FOREIGN KEY (appearance_id) REFERENCES appearances(id) ON DELETE SET NULL
             );
-
-            CREATE INDEX IF NOT EXISTS idx_cases_user_id ON cases(user_id);
-            CREATE INDEX IF NOT EXISTS idx_cases_priority ON cases(priority);
-            CREATE INDEX IF NOT EXISTS idx_cases_source ON cases(source);
-            CREATE INDEX IF NOT EXISTS idx_cases_court_system ON cases(court_system);
-            CREATE INDEX IF NOT EXISTS idx_appearances_case_id ON appearances(case_id);
-            CREATE INDEX IF NOT EXISTS idx_appearances_date ON appearances(appearance_date);
-            CREATE INDEX IF NOT EXISTS idx_case_events_case_id ON case_events(case_id);
-            CREATE INDEX IF NOT EXISTS idx_scrape_jobs_case_id ON scrape_jobs(case_id);
-            CREATE INDEX IF NOT EXISTS idx_scrape_jobs_status ON scrape_jobs(status);
-            CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
         """)
 
-        # Migration: add new columns to existing cases table if they don't exist
+        # Step 2: Migrate existing tables — add new columns if they don't exist
         existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
         migrations = [
             ("priority", "ALTER TABLE cases ADD COLUMN priority TEXT DEFAULT 'normal'"),
@@ -185,12 +175,25 @@ def init_db():
             if col_name not in existing_cols:
                 conn.execute(alter_sql)
 
-        # Migration: add source column to appearances if missing
         app_cols = {row[1] for row in conn.execute("PRAGMA table_info(appearances)").fetchall()}
         if "source" not in app_cols:
             conn.execute("ALTER TABLE appearances ADD COLUMN source TEXT DEFAULT 'manual'")
 
-        # Seed default court configurations
+        # Step 3: Create indexes (after migrations so columns exist)
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_cases_user_id ON cases(user_id);
+            CREATE INDEX IF NOT EXISTS idx_cases_priority ON cases(priority);
+            CREATE INDEX IF NOT EXISTS idx_cases_source ON cases(source);
+            CREATE INDEX IF NOT EXISTS idx_cases_court_system ON cases(court_system);
+            CREATE INDEX IF NOT EXISTS idx_appearances_case_id ON appearances(case_id);
+            CREATE INDEX IF NOT EXISTS idx_appearances_date ON appearances(appearance_date);
+            CREATE INDEX IF NOT EXISTS idx_case_events_case_id ON case_events(case_id);
+            CREATE INDEX IF NOT EXISTS idx_scrape_jobs_case_id ON scrape_jobs(case_id);
+            CREATE INDEX IF NOT EXISTS idx_scrape_jobs_status ON scrape_jobs(status);
+            CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+        """)
+
+        # Step 4: Seed default court configurations
         conn.execute("""
             INSERT OR IGNORE INTO court_configs (state, court_system, display_name, base_url, adapter_class)
             VALUES ('NY', 'ny_webcivil', 'NY WebCivil (Supreme & Civil)', 'https://iapps.courts.state.ny.us/webcivil', 'NYWebCivilAdapter')
