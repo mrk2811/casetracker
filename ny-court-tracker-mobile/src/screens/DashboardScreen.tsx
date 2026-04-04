@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { dashboardApi, DashboardAppearance } from "../services/api";
+import { dashboardApi, DashboardAppearance, FreshnessInfo } from "../services/api";
 
 const COURT_COLORS: Record<string, string> = {
   supreme: "#3b82f6",
@@ -23,6 +23,30 @@ const COURT_LABELS: Record<string, string> = {
   local_civil: "Local Civil",
   criminal: "Criminal",
 };
+
+const FRESHNESS_COLORS: Record<string, string> = {
+  fresh: "#10b981",
+  stale: "#f59e0b",
+  outdated: "#ef4444",
+  unknown: "#9ca3af",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "Manual",
+  webcivil_scraper: "WebCivil Scraper",
+  webcrimin_scraper: "WebCriminal Scraper",
+  etrack_email: "Court Notification",
+  api_provider: "API Provider",
+};
+
+function formatFreshness(freshness: FreshnessInfo | null): string {
+  if (!freshness || freshness.status === "unknown") return "Not checked yet";
+  const hours = freshness.hours_since_check;
+  if (hours === null) return "Not checked yet";
+  if (hours < 1) return "Just now";
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
 
 function getDayLabel(dateStr: string): string {
   const date = new Date(dateStr + "T00:00:00");
@@ -50,12 +74,15 @@ export default function DashboardScreen({ navigation }: any) {
   const [appearances, setAppearances] = useState<DashboardAppearance[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [filterPriority, setFilterPriority] = useState<string | null>(null);
 
   const fetchData = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const res = await dashboardApi.get({ days_ahead: 90 });
+      const params: any = { days_ahead: 90 };
+      if (filterPriority) params.priority = filterPriority;
+      const res = await dashboardApi.get(params);
       setAppearances(res.data);
     } catch (err) {
       console.error("Failed to fetch dashboard", err);
@@ -68,7 +95,7 @@ export default function DashboardScreen({ navigation }: any) {
   useFocusEffect(
     useCallback(() => {
       fetchData();
-    }, [])
+    }, [filterPriority])
   );
 
   const todayStr = new Date().toISOString().split("T")[0];
@@ -78,6 +105,7 @@ export default function DashboardScreen({ navigation }: any) {
 
   const todayCount = appearances.filter((a) => a.appearance_date === todayStr).length;
   const weekCount = appearances.filter((a) => a.appearance_date <= weekEndStr).length;
+  const highPriorityCount = appearances.filter((a) => a.priority === "high").length;
 
   // Group by date
   const grouped = appearances.reduce<Record<string, DashboardAppearance[]>>((acc, app) => {
@@ -125,10 +153,33 @@ export default function DashboardScreen({ navigation }: any) {
           <Text style={styles.statNumber}>{weekCount}</Text>
           <Text style={styles.statLabel}>This Week</Text>
         </View>
-        <View style={[styles.statCard, { borderLeftColor: "#3b82f6" }]}>
-          <Text style={styles.statNumber}>{appearances.length}</Text>
-          <Text style={styles.statLabel}>Total</Text>
+        <View style={[styles.statCard, { borderLeftColor: "#8b5cf6" }]}>
+          <Text style={styles.statNumber}>{highPriorityCount}</Text>
+          <Text style={styles.statLabel}>High Priority</Text>
         </View>
+      </View>
+
+      {/* Priority Filter */}
+      <View style={styles.filterRow}>
+        <TouchableOpacity
+          style={[styles.filterChip, !filterPriority && styles.filterChipActive]}
+          onPress={() => setFilterPriority(null)}
+        >
+          <Text style={[styles.filterChipText, !filterPriority && styles.filterChipTextActive]}>All</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterChip, filterPriority === "high" && styles.filterChipActive]}
+          onPress={() => setFilterPriority(filterPriority === "high" ? null : "high")}
+        >
+          <Ionicons name="flag" size={12} color={filterPriority === "high" ? "#fff" : "#ef4444"} />
+          <Text style={[styles.filterChipText, filterPriority === "high" && styles.filterChipTextActive]}>High Priority</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterChip, filterPriority === "normal" && styles.filterChipActive]}
+          onPress={() => setFilterPriority(filterPriority === "normal" ? null : "normal")}
+        >
+          <Text style={[styles.filterChipText, filterPriority === "normal" && styles.filterChipTextActive]}>Normal</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Appearances */}
@@ -166,15 +217,23 @@ export default function DashboardScreen({ navigation }: any) {
                 }
               >
                 <View style={styles.cardLeft}>
-                  <View
-                    style={[
-                      styles.courtBadge,
-                      { backgroundColor: COURT_COLORS[app.court_type] || "#6b7280" },
-                    ]}
-                  >
-                    <Text style={styles.courtBadgeText}>
-                      {COURT_LABELS[app.court_type] || app.court_type}
-                    </Text>
+                  <View style={styles.badgeRow}>
+                    <View
+                      style={[
+                        styles.courtBadge,
+                        { backgroundColor: COURT_COLORS[app.court_type] || "#6b7280" },
+                      ]}
+                    >
+                      <Text style={styles.courtBadgeText}>
+                        {COURT_LABELS[app.court_type] || app.court_type}
+                      </Text>
+                    </View>
+                    {app.priority === "high" && (
+                      <View style={styles.priorityBadge}>
+                        <Ionicons name="flag" size={10} color="#ef4444" />
+                        <Text style={styles.priorityText}>HIGH</Text>
+                      </View>
+                    )}
                   </View>
                   <Text style={styles.caseIndex}>
                     {app.index_number}{" "}
@@ -184,6 +243,23 @@ export default function DashboardScreen({ navigation }: any) {
                     <Text style={styles.partiesText} numberOfLines={1}>
                       {app.plaintiff} v. {app.defendant}
                     </Text>
+                  )}
+                  {/* Freshness Indicator */}
+                  {app.freshness && (
+                    <View style={styles.freshnessRow}>
+                      <View
+                        style={[
+                          styles.freshnessDot,
+                          { backgroundColor: FRESHNESS_COLORS[app.freshness.status] || "#9ca3af" },
+                        ]}
+                      />
+                      <Text style={styles.freshnessText}>
+                        {formatFreshness(app.freshness)}
+                        {app.freshness.last_source
+                          ? ` | ${SOURCE_LABELS[app.freshness.last_source] || app.freshness.last_source}`
+                          : ""}
+                      </Text>
+                    </View>
                   )}
                 </View>
                 <View style={styles.cardRight}>
@@ -259,6 +335,29 @@ const styles = StyleSheet.create({
   },
   statNumber: { fontSize: 22, fontWeight: "700", color: "#18181b" },
   statLabel: { fontSize: 12, color: "#6b7280", marginTop: 2 },
+  filterRow: {
+    flexDirection: "row",
+    paddingHorizontal: 20,
+    gap: 8,
+    marginTop: 12,
+  },
+  filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    backgroundColor: "#fff",
+  },
+  filterChipActive: {
+    backgroundColor: "#18181b",
+    borderColor: "#18181b",
+  },
+  filterChipText: { fontSize: 12, fontWeight: "500", color: "#374151" },
+  filterChipTextActive: { color: "#fff" },
   dateGroup: { marginTop: 20, paddingHorizontal: 20 },
   dateHeader: { flexDirection: "row", alignItems: "baseline", gap: 8, marginBottom: 8 },
   dayLabel: { fontSize: 15, fontWeight: "600", color: "#ef4444" },
@@ -277,17 +376,41 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   cardLeft: { flex: 1, marginRight: 12 },
+  badgeRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
   courtBadge: {
     alignSelf: "flex-start",
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 4,
-    marginBottom: 6,
   },
+  priorityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+  },
+  priorityText: { fontSize: 10, fontWeight: "700", color: "#ef4444" },
   courtBadgeText: { color: "#fff", fontSize: 11, fontWeight: "600" },
   caseIndex: { fontSize: 15, fontWeight: "600", color: "#18181b" },
   countyText: { fontSize: 13, fontWeight: "400", color: "#6b7280" },
   partiesText: { fontSize: 13, color: "#6b7280", marginTop: 2 },
+  freshnessRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+  },
+  freshnessDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  freshnessText: { fontSize: 11, color: "#9ca3af" },
   cardRight: { alignItems: "flex-end", justifyContent: "center" },
   timeRow: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 2 },
   timeText: { fontSize: 13, color: "#6b7280" },

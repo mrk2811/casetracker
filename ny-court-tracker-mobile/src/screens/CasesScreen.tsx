@@ -4,13 +4,14 @@ import {
   Text,
   StyleSheet,
   FlatList,
+  ScrollView,
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { casesApi, Case } from "../services/api";
+import { casesApi, Case, FreshnessInfo } from "../services/api";
 
 const COURT_COLORS: Record<string, string> = {
   supreme: "#3b82f6",
@@ -30,16 +31,45 @@ const STATUS_COLORS: Record<string, string> = {
   disposed: "#6b7280",
 };
 
+const FRESHNESS_COLORS: Record<string, string> = {
+  fresh: "#10b981",
+  stale: "#f59e0b",
+  outdated: "#ef4444",
+  unknown: "#9ca3af",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "Manual",
+  webcivil_scraper: "WebCivil",
+  webcrimin_scraper: "WebCriminal",
+  etrack_email: "eTrack Email",
+  api_provider: "API",
+};
+
+function formatFreshness(freshness: FreshnessInfo | null): string {
+  if (!freshness || freshness.status === "unknown") return "Not checked";
+  const hours = freshness.hours_since_check;
+  if (hours === null) return "Not checked";
+  if (hours < 1) return "Just now";
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 export default function CasesScreen({ navigation }: any) {
   const [cases, setCases] = useState<Case[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [filterPriority, setFilterPriority] = useState<string | null>(null);
+  const [filterSource, setFilterSource] = useState<string | null>(null);
 
   const fetchCases = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const res = await casesApi.list({ sort_by: "next_appearance" });
+      const params: any = { sort_by: "next_appearance" };
+      if (filterPriority) params.priority = filterPriority;
+      if (filterSource) params.source = filterSource;
+      const res = await casesApi.list(params);
       setCases(res.data);
     } catch (err) {
       console.error("Failed to fetch cases", err);
@@ -52,7 +82,7 @@ export default function CasesScreen({ navigation }: any) {
   useFocusEffect(
     useCallback(() => {
       fetchCases();
-    }, [])
+    }, [filterPriority, filterSource])
   );
 
   const renderCase = ({ item }: { item: Case }) => (
@@ -87,6 +117,12 @@ export default function CasesScreen({ navigation }: any) {
               {item.case_status}
             </Text>
           </View>
+          {item.priority === "high" && (
+            <View style={styles.priorityBadge}>
+              <Ionicons name="flag" size={10} color="#ef4444" />
+              <Text style={styles.priorityBadgeText}>HIGH</Text>
+            </View>
+          )}
         </View>
         <Ionicons name="chevron-forward" size={20} color="#d1d5db" />
       </View>
@@ -123,6 +159,31 @@ export default function CasesScreen({ navigation }: any) {
           </Text>
         </View>
       )}
+
+      {/* Freshness + Source Row */}
+      <View style={styles.metaRow}>
+        {item.freshness && (
+          <View style={styles.freshnessChip}>
+            <View
+              style={[
+                styles.freshnessDot,
+                { backgroundColor: FRESHNESS_COLORS[item.freshness.status] || "#9ca3af" },
+              ]}
+            />
+            <Text style={styles.metaText}>{formatFreshness(item.freshness)}</Text>
+          </View>
+        )}
+        <View style={styles.sourceChip}>
+          <Ionicons name="link-outline" size={10} color="#9ca3af" />
+          <Text style={styles.metaText}>{SOURCE_LABELS[item.source] || item.source}</Text>
+        </View>
+        {item.verified && (
+          <View style={styles.verifiedChip}>
+            <Ionicons name="checkmark-circle" size={10} color="#10b981" />
+            <Text style={[styles.metaText, { color: "#10b981" }]}>Verified</Text>
+          </View>
+        )}
+      </View>
     </TouchableOpacity>
   );
 
@@ -151,6 +212,35 @@ export default function CasesScreen({ navigation }: any) {
           <Text style={styles.addButtonText}>Add</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Filters */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterRow} contentContainerStyle={styles.filterContent}>
+        <TouchableOpacity
+          style={[styles.filterChip, !filterPriority && !filterSource && styles.filterChipActive]}
+          onPress={() => { setFilterPriority(null); setFilterSource(null); }}
+        >
+          <Text style={[styles.filterChipText, !filterPriority && !filterSource && styles.filterChipTextActive]}>All</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterChip, filterPriority === "high" && styles.filterChipActive]}
+          onPress={() => setFilterPriority(filterPriority === "high" ? null : "high")}
+        >
+          <Ionicons name="flag" size={12} color={filterPriority === "high" ? "#fff" : "#ef4444"} />
+          <Text style={[styles.filterChipText, filterPriority === "high" && styles.filterChipTextActive]}>High Priority</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterChip, filterSource === "manual" && styles.filterChipActive]}
+          onPress={() => setFilterSource(filterSource === "manual" ? null : "manual")}
+        >
+          <Text style={[styles.filterChipText, filterSource === "manual" && styles.filterChipTextActive]}>Manual</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterChip, filterSource === "etrack_email" && styles.filterChipActive]}
+          onPress={() => setFilterSource(filterSource === "etrack_email" ? null : "etrack_email")}
+        >
+          <Text style={[styles.filterChipText, filterSource === "etrack_email" && styles.filterChipTextActive]}>eTrack Email</Text>
+        </TouchableOpacity>
+      </ScrollView>
 
       {cases.length === 0 ? (
         <View style={styles.emptyState}>
@@ -249,6 +339,74 @@ const styles = StyleSheet.create({
     borderTopColor: "#f3f4f6",
   },
   nextAppearanceText: { fontSize: 13, color: "#6b7280" },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#f3f4f6",
+  },
+  freshnessChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  freshnessDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  sourceChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  verifiedChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  metaText: { fontSize: 11, color: "#9ca3af" },
+  priorityBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+  },
+  priorityBadgeText: { fontSize: 10, fontWeight: "700", color: "#ef4444" },
+  filterRow: {
+    maxHeight: 44,
+    paddingHorizontal: 20,
+    marginBottom: 4,
+  },
+  filterContent: {
+    gap: 8,
+    alignItems: "center",
+  },
+  filterChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    backgroundColor: "#fff",
+  },
+  filterChipActive: {
+    backgroundColor: "#18181b",
+    borderColor: "#18181b",
+  },
+  filterChipText: { fontSize: 12, fontWeight: "500", color: "#374151" },
+  filterChipTextActive: { color: "#fff" },
   emptyState: { flex: 1, justifyContent: "center", alignItems: "center", padding: 40 },
   emptyTitle: { fontSize: 18, fontWeight: "600", color: "#18181b", marginTop: 16 },
   emptySubtitle: { fontSize: 14, color: "#6b7280", marginTop: 8, textAlign: "center" },

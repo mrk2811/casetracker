@@ -24,6 +24,13 @@ export interface User {
   created_at: string;
 }
 
+export interface FreshnessInfo {
+  last_checked_at: string | null;
+  last_source: string | null;
+  hours_since_check: number | null;
+  status: "fresh" | "stale" | "outdated" | "unknown";
+}
+
 export interface Case {
   id: number;
   user_id: number;
@@ -39,9 +46,16 @@ export interface Case {
   justice: string | null;
   part: string | null;
   notes: string | null;
+  priority: string;
+  source: string;
+  last_checked_at: string | null;
+  last_source: string | null;
+  verified: boolean;
+  court_system: string | null;
   created_at: string;
   updated_at: string;
   next_appearance: string | null;
+  freshness: FreshnessInfo | null;
 }
 
 export interface Appearance {
@@ -71,6 +85,52 @@ export interface DashboardAppearance {
   defendant: string | null;
   justice: string | null;
   part: string | null;
+  priority: string;
+  source: string;
+  freshness: FreshnessInfo | null;
+}
+
+export interface CaseSearchResult {
+  index_number: string;
+  court_type: string;
+  county: string;
+  case_year: number | null;
+  case_status: string | null;
+  plaintiff: string | null;
+  defendant: string | null;
+  plaintiff_firm: string | null;
+  defendant_firm: string | null;
+  justice: string | null;
+  part: string | null;
+  last_action: string | null;
+  last_action_date: string | null;
+  source: string;
+}
+
+export interface CaseSearchResponse {
+  results: CaseSearchResult[];
+  court_system: string;
+  message: string;
+}
+
+export interface CourtConfig {
+  id: number;
+  state: string;
+  court_system: string;
+  display_name: string;
+  base_url: string | null;
+  adapter_class: string;
+  enabled: boolean;
+}
+
+export interface CaseEvent {
+  id: number;
+  case_id: number;
+  event_type: string;
+  event_date: string | null;
+  description: string | null;
+  source: string;
+  created_at: string;
 }
 
 export interface NotificationSettings {
@@ -113,6 +173,9 @@ export const casesApi = {
     court_type?: string;
     county?: string;
     status?: string;
+    priority?: string;
+    source?: string;
+    verified?: boolean;
     sort_by?: string;
   }) => api.get<Case[]>("/api/cases", { params }),
   get: (id: number) => api.get<Case>(`/api/cases/${id}`),
@@ -120,6 +183,20 @@ export const casesApi = {
   update: (id: number, data: Partial<Case>) =>
     api.put<Case>(`/api/cases/${id}`, data),
   delete: (id: number) => api.delete(`/api/cases/${id}`),
+  search: (data: {
+    index_number: string;
+    court_type: string;
+    county: string;
+    court_system?: string;
+  }) => api.post<CaseSearchResponse>("/api/cases/search", data),
+  verify: (data: Partial<Case> & { court_system?: string; search_params?: string }) =>
+    api.post<Case>("/api/cases/verify", data),
+  getEvents: (caseId: number) =>
+    api.get<CaseEvent[]>(`/api/cases/${caseId}/events`),
+  getFreshness: (caseId: number) =>
+    api.get<FreshnessInfo>(`/api/cases/${caseId}/freshness`),
+  updatePriority: (caseId: number, priority: string) =>
+    api.put<Case>(`/api/cases/${caseId}/priority`, null, { params: { priority } }),
 };
 
 // Appearances
@@ -138,10 +215,18 @@ export const dashboardApi = {
   get: (params?: {
     court_type?: string;
     county?: string;
+    priority?: string;
+    source?: string;
     days_ahead?: number;
   }) => api.get<DashboardAppearance[]>("/api/dashboard", { params }),
   calendar: (params?: { month?: number; year?: number }) =>
     api.get<DashboardAppearance[]>("/api/dashboard/calendar", { params }),
+};
+
+// Court Configs
+export const courtConfigsApi = {
+  list: () => api.get<CourtConfig[]>("/api/court-configs"),
+  adapters: () => api.get("/api/court-configs/adapters"),
 };
 
 // Notifications
