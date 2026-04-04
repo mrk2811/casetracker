@@ -1,7 +1,7 @@
 import axios from "axios";
 import { storage } from "./storage";
 
-const API_URL = "http://localhost:8000";
+const API_URL = "https://app-ujjdvsxl.fly.dev";
 
 const api = axios.create({
   baseURL: API_URL,
