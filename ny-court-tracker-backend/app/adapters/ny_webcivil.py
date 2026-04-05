@@ -1,12 +1,16 @@
 """
-NY WebCivil adapter stub.
+NY WebCivil adapter - scrapes iapps.courts.state.ny.us/webcivil.
 
-This adapter will be fully implemented in Phase 2 (scraper engine).
-For now, it provides the interface and returns mock/placeholder data
-for the case verification flow.
+Implements search by index number and party name, case detail parsing,
+appearance extraction, and health checks for the NY WebCivil Supreme system.
 """
 
+import logging
+import re
+from datetime import datetime
 from typing import Optional
+
+from bs4 import BeautifulSoup
 
 from app.adapters.base import (
     CourtAdapter,
@@ -16,6 +20,308 @@ from app.adapters.base import (
     CaseSource,
     CourtSystem,
 )
+from app.scraper.engine import ScraperEngine
+
+logger = logging.getLogger(__name__)
+
+BASE_URL = "https://iapps.courts.state.ny.us/webcivil"
+
+# Mapping of county names to court select values used by WebCivil
+COUNTY_COURT_VALUES: dict[str, dict[str, str]] = {
+    "albany": {"county": "1", "supreme": "2"},
+    "allegany": {"county": "3", "supreme": "4"},
+    "bronx": {"supreme": "124"},
+    "broome": {"county": "5", "supreme": "6"},
+    "cattaraugus": {"county": "7", "supreme": "8"},
+    "cayuga": {"county": "9", "supreme": "10"},
+    "chautauqua": {"county": "11", "supreme": "12"},
+    "chemung": {"county": "13", "supreme": "14"},
+    "chenango": {"county": "15", "supreme": "16"},
+    "clinton": {"county": "17", "supreme": "18"},
+    "columbia": {"county": "19", "supreme": "20"},
+    "cortland": {"county": "21", "supreme": "22"},
+    "delaware": {"county": "23", "supreme": "24"},
+    "dutchess": {"county": "25", "supreme": "26"},
+    "erie": {"county": "27", "supreme": "28"},
+    "essex": {"county": "29", "supreme": "30"},
+    "franklin": {"county": "31", "supreme": "32"},
+    "fulton": {"county": "33", "supreme": "34"},
+    "genesee": {"county": "35", "supreme": "36"},
+    "greene": {"county": "37", "supreme": "38"},
+    "hamilton": {"county": "39", "supreme": "40"},
+    "herkimer": {"county": "41", "supreme": "42"},
+    "jefferson": {"county": "43", "supreme": "44"},
+    "kings": {"supreme": "46"},
+    "lewis": {"county": "47", "supreme": "48"},
+    "livingston": {"county": "49", "supreme": "50"},
+    "madison": {"county": "51", "supreme": "52"},
+    "monroe": {"county": "53", "supreme": "54"},
+    "montgomery": {"county": "55", "supreme": "56"},
+    "nassau": {"county": "57", "supreme": "58"},
+    "new york": {"supreme": "60"},
+    "niagara": {"county": "61", "supreme": "62"},
+    "oneida": {"county": "63", "supreme": "64"},
+    "onondaga": {"county": "65", "supreme": "66"},
+    "ontario": {"county": "67", "supreme": "68"},
+    "orange": {"county": "69", "supreme": "70"},
+    "orleans": {"county": "71", "supreme": "72"},
+    "oswego": {"county": "73", "supreme": "74"},
+    "otsego": {"county": "75", "supreme": "76"},
+    "putnam": {"county": "77", "supreme": "78"},
+    "queens": {"supreme": "80"},
+    "rensselaer": {"county": "81", "supreme": "82"},
+    "richmond": {"supreme": "84"},
+    "rockland": {"county": "85", "supreme": "86"},
+    "saratoga": {"county": "89", "supreme": "90"},
+    "schenectady": {"county": "91", "supreme": "92"},
+    "schoharie": {"county": "93", "supreme": "94"},
+    "schuyler": {"county": "95", "supreme": "96"},
+    "seneca": {"county": "97", "supreme": "98"},
+    "st. lawrence": {"county": "87", "supreme": "88"},
+    "steuben": {"county": "99", "supreme": "100"},
+    "suffolk": {"county": "101", "supreme": "102"},
+    "sullivan": {"county": "103", "supreme": "104"},
+    "tioga": {"county": "105", "supreme": "106"},
+    "tompkins": {"county": "107", "supreme": "108"},
+    "ulster": {"county": "109", "supreme": "110"},
+    "warren": {"county": "111", "supreme": "112"},
+    "washington": {"county": "113", "supreme": "114"},
+    "wayne": {"county": "115", "supreme": "116"},
+    "westchester": {"county": "117", "supreme": "118"},
+    "wyoming": {"county": "119", "supreme": "120"},
+    "yates": {"county": "121", "supreme": "122"},
+}
+
+
+def _get_court_value(county: str) -> Optional[str]:
+    """Look up the WebCivil court select value for a county."""
+    county_lower = county.lower().strip()
+    courts = COUNTY_COURT_VALUES.get(county_lower)
+    if not courts:
+        return None
+    return courts.get("supreme") or courts.get("county")
+
+
+def _clean_text(text: Optional[str]) -> Optional[str]:
+    """Clean whitespace from extracted text."""
+    if not text:
+        return None
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    return cleaned if cleaned else None
+
+
+def _parse_search_results_table(soup: BeautifulSoup) -> list[dict]:
+    """
+    Parse the search results table from WebCivil.
+    Each case row contains a link to FCASCaseDetail.
+    """
+    results = []
+
+    all_links = soup.find_all("a")
+    for link in all_links:
+        href = link.get("href", "")
+        if "FCASCaseDetail" not in href:
+            continue
+
+        index_text = _clean_text(link.get_text())
+        if not index_text:
+            continue
+
+        row = link.find_parent("tr")
+        if not row:
+            continue
+
+        cells = row.find_all("td")
+        if len(cells) < 3:
+            continue
+
+        result: dict = {
+            "detail_url": href,
+            "index_number": index_text,
+        }
+
+        cell_texts = [_clean_text(cell.get_text()) for cell in cells]
+
+        if len(cell_texts) >= 5:
+            result["court_name"] = cell_texts[1]
+            result["year"] = cell_texts[2]
+            result["plaintiff"] = cell_texts[3]
+            result["defendant"] = cell_texts[4]
+        elif len(cell_texts) >= 3:
+            result["court_name"] = cell_texts[1]
+            result["plaintiff"] = cell_texts[2] if len(cell_texts) > 2 else None
+
+        results.append(result)
+
+    return results
+
+
+def _parse_case_detail_page(soup: BeautifulSoup) -> dict:
+    """Parse a case detail page from WebCivil."""
+    detail: dict = {}
+
+    all_text = soup.get_text(" ", strip=True)
+
+    patterns = {
+        "case_status": [
+            r"(?:Case\s*)?Status\s*[:\-]\s*([^\n\r]+)",
+            r"Disposition\s*[:\-]\s*([^\n\r]+)",
+        ],
+        "justice": [
+            r"Justice\s*[:\-]\s*([^\n\r]+)",
+            r"Judge\s*[:\-]\s*([^\n\r]+)",
+            r"Assigned\s+Justice\s*[:\-]\s*([^\n\r]+)",
+        ],
+        "part": [
+            r"Part\s*[:\-]\s*([^\n\r]+)",
+            r"Calendar\s+Part\s*[:\-]\s*([^\n\r]+)",
+        ],
+    }
+
+    for field_name, field_patterns in patterns.items():
+        for pattern in field_patterns:
+            match = re.search(pattern, all_text, re.IGNORECASE)
+            if match:
+                detail[field_name] = _clean_text(match.group(1))
+                break
+
+    rows = soup.find_all("tr")
+    for row in rows:
+        cells = row.find_all("td")
+        if len(cells) >= 2:
+            label = _clean_text(cells[0].get_text())
+            value = _clean_text(cells[1].get_text())
+            if label and value:
+                label_lower = label.lower().rstrip(":")
+                if "plaintiff" in label_lower and "firm" in label_lower:
+                    detail.setdefault("plaintiff_firm", value)
+                elif "defendant" in label_lower and "firm" in label_lower:
+                    detail.setdefault("defendant_firm", value)
+                elif "plaintiff" in label_lower or "petitioner" in label_lower:
+                    detail.setdefault("plaintiff", value)
+                elif "defendant" in label_lower or "respondent" in label_lower:
+                    detail.setdefault("defendant", value)
+                elif label_lower in ("justice", "judge", "assigned justice"):
+                    detail.setdefault("justice", value)
+                elif label_lower in ("part", "calendar part"):
+                    detail.setdefault("part", value)
+                elif label_lower in ("status", "case status", "disposition"):
+                    detail.setdefault("case_status", value)
+                elif label_lower in ("index number", "index no", "case number"):
+                    detail.setdefault("index_number", value)
+                elif label_lower in ("county", "court"):
+                    detail.setdefault("county", value)
+                elif label_lower in ("filed", "year filed", "filing date"):
+                    detail.setdefault("year_filed", value)
+
+    detail["last_action"] = _extract_last_action(soup)
+    detail["last_action_date"] = _extract_last_action_date(soup)
+
+    return detail
+
+
+def _extract_last_action(soup: BeautifulSoup) -> Optional[str]:
+    """Extract the most recent court action/filing from the detail page."""
+    text = soup.get_text(" ", strip=True)
+
+    patterns = [
+        r"(?:Last|Latest|Most Recent)\s+(?:Action|Filing|Motion)\s*[:\-]\s*([^\n\r]+)",
+        r"Motion\s*#?\s*\d+\s*[:\-]?\s*([^\n\r]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return _clean_text(match.group(1))
+
+    tables = soup.find_all("table")
+    for table in tables:
+        headers = table.find_all("th")
+        header_texts = [_clean_text(h.get_text()) for h in headers]
+        header_lower = [h.lower() if h else "" for h in header_texts]
+
+        is_filing_table = any(
+            keyword in " ".join(header_lower)
+            for keyword in ["motion", "filing", "action", "sequence", "document"]
+        )
+
+        if is_filing_table:
+            rows = table.find_all("tr")
+            if len(rows) > 1:
+                last_row = rows[-1]
+                cells = last_row.find_all("td")
+                if cells:
+                    cell_texts = [_clean_text(c.get_text()) for c in cells]
+                    action_text = " - ".join(t for t in cell_texts if t)
+                    if action_text:
+                        return action_text
+
+    return None
+
+
+def _extract_last_action_date(soup: BeautifulSoup) -> Optional[str]:
+    """Extract the date of the most recent court action."""
+    text = soup.get_text(" ", strip=True)
+
+    patterns = [
+        r"(?:Last|Latest|Most Recent)\s+(?:Action|Filing)\s+Date\s*[:\-]\s*(\d{1,2}/\d{1,2}/\d{2,4})",
+        r"Filed\s*[:\-]?\s*(\d{1,2}/\d{1,2}/\d{2,4})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    return None
+
+
+def _parse_appearances_from_detail(soup: BeautifulSoup) -> list[dict]:
+    """Extract appearance/calendar entries from a case detail page."""
+    appearances = []
+
+    tables = soup.find_all("table")
+    for table in tables:
+        headers = table.find_all("th")
+        header_texts = [(_clean_text(h.get_text()) or "").lower() for h in headers]
+
+        is_appearance_table = any(
+            keyword in " ".join(header_texts)
+            for keyword in ["appearance", "calendar", "scheduled"]
+        )
+
+        if not is_appearance_table:
+            continue
+
+        rows = table.find_all("tr")[1:]
+        for row in rows:
+            cells = row.find_all("td")
+            if not cells:
+                continue
+
+            cell_texts = [_clean_text(c.get_text()) for c in cells]
+
+            appearance: dict = {}
+            for i, header_text in enumerate(header_texts):
+                if i >= len(cell_texts):
+                    break
+                value = cell_texts[i]
+                if not value:
+                    continue
+
+                if "date" in header_text:
+                    appearance["date"] = value
+                elif "time" in header_text:
+                    appearance["time"] = value
+                elif "type" in header_text or "reason" in header_text:
+                    appearance["type"] = value
+                elif "part" in header_text or "location" in header_text or "room" in header_text:
+                    appearance["location"] = value
+                elif "result" in header_text or "outcome" in header_text:
+                    appearance["result"] = value
+
+            if appearance.get("date"):
+                appearances.append(appearance)
+
+    return appearances
 
 
 class NYWebCivilAdapter(CourtAdapter):
@@ -24,6 +330,14 @@ class NYWebCivilAdapter(CourtAdapter):
     Covers Supreme Court, Civil Court, and Housing Court cases.
     Base URL: https://iapps.courts.state.ny.us/webcivil
     """
+
+    def __init__(self) -> None:
+        self._engine: Optional[ScraperEngine] = None
+
+    def _get_engine(self) -> ScraperEngine:
+        if self._engine is None:
+            self._engine = ScraperEngine()
+        return self._engine
 
     @property
     def court_system(self) -> CourtSystem:
@@ -38,47 +352,239 @@ class NYWebCivilAdapter(CourtAdapter):
         return "NY"
 
     async def search(self, params: SearchParams) -> list[CourtRecord]:
-        """
-        Search NY WebCivil for cases matching the given parameters.
+        """Search NY WebCivil for cases by index number or party name."""
+        engine = self._get_engine()
 
-        Phase 2 will implement actual scraping via headless Selenium.
-        For now, returns an empty list. The manual entry flow still works.
-        """
-        # TODO Phase 2: Implement Selenium-based scraper
-        # - Navigate to https://iapps.courts.state.ny.us/webcivil/FCASSearch
-        # - Fill in search parameters (index number, county, court type)
-        # - Parse results table
-        # - Handle CAPTCHAs (flag and fall back to email)
-        return []
+        if params.index_number:
+            return await self._search_by_index(engine, params)
+        elif params.plaintiff or params.defendant:
+            return await self._search_by_party(engine, params)
+        else:
+            logger.warning("No search parameters provided for NYWebCivil search")
+            return []
+
+    async def _search_by_index(
+        self, engine: ScraperEngine, params: SearchParams
+    ) -> list[CourtRecord]:
+        """Search by index number."""
+        search_url = f"{BASE_URL}/FCASSearch"
+
+        form_data: dict[str, str] = {
+            "txtIndex": params.index_number or "",
+            "cboSort": "index_number",
+            "rbOutputFormat": "H",
+            "param": "I",
+        }
+
+        if params.county:
+            court_value = _get_court_value(params.county)
+            if court_value:
+                form_data["cboCourt"] = court_value
+
+        logger.info(
+            "Searching NYWebCivil by index: %s (county: %s)",
+            params.index_number,
+            params.county,
+        )
+
+        result = await engine.post(search_url, data=form_data)
+
+        if not result.success:
+            if result.captcha_detected:
+                logger.warning("CAPTCHA blocked NYWebCivil index search")
+            return []
+
+        if not result.soup:
+            return []
+
+        return self._parse_search_results(result.soup, params)
+
+    async def _search_by_party(
+        self, engine: ScraperEngine, params: SearchParams
+    ) -> list[CourtRecord]:
+        """Search by party name."""
+        search_url = f"{BASE_URL}/FCASSearch"
+
+        form_data: dict[str, str] = {
+            "cboSort": "index_number",
+            "rbOutputFormat": "H",
+            "param": "P",
+        }
+
+        if params.plaintiff:
+            form_data["txtPlaintiff"] = params.plaintiff
+        if params.defendant:
+            form_data["txtDefendant"] = params.defendant
+
+        if params.county:
+            court_value = _get_court_value(params.county)
+            if court_value:
+                form_data["cboCourt"] = court_value
+
+        logger.info(
+            "Searching NYWebCivil by party: plaintiff=%s defendant=%s",
+            params.plaintiff,
+            params.defendant,
+        )
+
+        result = await engine.post(search_url, data=form_data)
+
+        if not result.success:
+            if result.captcha_detected:
+                logger.warning("CAPTCHA blocked NYWebCivil party search")
+            return []
+
+        if not result.soup:
+            return []
+
+        return self._parse_search_results(result.soup, params)
+
+    def _parse_search_results(
+        self, soup: BeautifulSoup, params: SearchParams
+    ) -> list[CourtRecord]:
+        """Parse search results page into CourtRecord objects."""
+        raw_results = _parse_search_results_table(soup)
+
+        records = []
+        for raw in raw_results:
+            case_year = None
+            year_str = raw.get("year")
+            if year_str:
+                year_match = re.search(r"\d{4}", year_str)
+                if year_match:
+                    try:
+                        case_year = int(year_match.group())
+                    except ValueError:
+                        pass
+
+            county = params.county or ""
+            court_name = raw.get("court_name", "")
+            if court_name:
+                county_match = re.match(
+                    r"(\w[\w\s.]+?)(?:\s+(?:Supreme|County)\s+Court)",
+                    court_name,
+                )
+                if county_match:
+                    county = county_match.group(1).strip()
+
+            record = CourtRecord(
+                index_number=raw.get("index_number", ""),
+                court_type=params.court_type or "supreme",
+                county=county,
+                case_year=case_year,
+                plaintiff=raw.get("plaintiff"),
+                defendant=raw.get("defendant"),
+                source=CaseSource.WEBCIVIL_SCRAPER,
+                raw_data=raw,
+            )
+            records.append(record)
+
+        logger.info("NYWebCivil search returned %d results", len(records))
+        return records
 
     async def get_case_details(
         self, index_number: str, court_type: str, county: str
     ) -> Optional[CourtRecord]:
-        """
-        Fetch full details for a specific case from NY WebCivil.
+        """Fetch full details for a specific case from NY WebCivil."""
+        engine = self._get_engine()
 
-        Phase 2 will implement actual scraping.
-        For now, returns None (case not found via scraper).
-        """
-        # TODO Phase 2: Implement case detail scraping
-        return None
+        params = SearchParams(
+            index_number=index_number,
+            court_type=court_type,
+            county=county,
+        )
+        search_results = await self.search(params)
+
+        if not search_results:
+            logger.info("No results found for case %s", index_number)
+            return None
+
+        record = search_results[0]
+
+        detail_url = record.raw_data.get("detail_url") if record.raw_data else None
+        if detail_url:
+            if not detail_url.startswith("http"):
+                detail_url = f"{BASE_URL}/{detail_url}"
+
+            detail_result = await engine.get(detail_url)
+            if detail_result.success and detail_result.soup:
+                detail_data = _parse_case_detail_page(detail_result.soup)
+
+                record.case_status = detail_data.get("case_status") or record.case_status
+                record.plaintiff = detail_data.get("plaintiff") or record.plaintiff
+                record.defendant = detail_data.get("defendant") or record.defendant
+                record.plaintiff_firm = detail_data.get("plaintiff_firm")
+                record.defendant_firm = detail_data.get("defendant_firm")
+                record.justice = detail_data.get("justice")
+                record.part = detail_data.get("part")
+                record.last_action = detail_data.get("last_action")
+                record.last_action_date = detail_data.get("last_action_date")
+
+        return record
 
     async def get_appearances(
         self, index_number: str, court_type: str, county: str
     ) -> list[AppearanceRecord]:
-        """
-        Fetch all scheduled appearances for a case from NY WebCivil.
+        """Fetch all scheduled appearances for a case from NY WebCivil."""
+        engine = self._get_engine()
 
-        Phase 2 will implement actual scraping.
-        """
-        # TODO Phase 2: Implement appearance scraping
-        return []
+        params = SearchParams(
+            index_number=index_number,
+            court_type=court_type,
+            county=county,
+        )
+
+        search_results = await self.search(params)
+        if not search_results:
+            return []
+
+        record = search_results[0]
+        detail_url = record.raw_data.get("detail_url") if record.raw_data else None
+
+        if not detail_url:
+            return []
+
+        if not detail_url.startswith("http"):
+            detail_url = f"{BASE_URL}/{detail_url}"
+
+        detail_result = await engine.get(detail_url)
+        if not detail_result.success or not detail_result.soup:
+            return []
+
+        raw_appearances = _parse_appearances_from_detail(detail_result.soup)
+
+        appearances = []
+        for raw in raw_appearances:
+            date_str = raw.get("date")
+            if not date_str:
+                continue
+
+            appearance_date = None
+            for fmt in ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d"):
+                try:
+                    appearance_date = datetime.strptime(date_str, fmt).date()
+                    break
+                except ValueError:
+                    continue
+
+            if not appearance_date:
+                continue
+
+            appearances.append(AppearanceRecord(
+                appearance_date=appearance_date,
+                appearance_time=raw.get("time"),
+                appearance_type=raw.get("type"),
+                location=raw.get("location"),
+                notes=raw.get("result"),
+                source=CaseSource.WEBCIVIL_SCRAPER,
+            ))
+
+        logger.info(
+            "Found %d appearances for case %s", len(appearances), index_number
+        )
+        return appearances
 
     async def health_check(self) -> bool:
-        """
-        Check if NY WebCivil is accessible.
-
-        Phase 2 will implement an actual HTTP check.
-        """
-        # TODO Phase 2: Implement health check (HEAD request to base URL)
-        return False
+        """Check if NY WebCivil is accessible."""
+        engine = self._get_engine()
+        return await engine.health_check(f"{BASE_URL}/FCASMain")
