@@ -21,6 +21,12 @@ const REMINDER_OPTIONS = [
   { value: 30, label: "30 days before" },
 ];
 
+const DIGEST_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+];
+
 export default function SettingsScreen() {
   const { user, logout } = useAuth();
   const navigation = useNavigation<any>();
@@ -28,6 +34,7 @@ export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showReminderPicker, setShowReminderPicker] = useState(false);
+  const [showDigestPicker, setShowDigestPicker] = useState(false);
   const [emailStatus, setEmailStatus] = useState<{ configured: boolean; verified: boolean } | null>(null);
 
   const fetchSettings = async () => {
@@ -64,11 +71,7 @@ export default function SettingsScreen() {
     setSettings(newSettings);
     setSaving(true);
     try {
-      await notificationsApi.updateSettings({
-        email_enabled: newSettings.email_enabled,
-        reminder_days: newSettings.reminder_days,
-        case_updates_enabled: newSettings.case_updates_enabled,
-      });
+      await notificationsApi.updateSettings(updated);
     } catch (err) {
       Alert.alert("Error", "Failed to save settings");
       fetchSettings();
@@ -94,6 +97,10 @@ export default function SettingsScreen() {
 
   const selectedReminder = REMINDER_OPTIONS.find(
     (r) => r.value === settings?.reminder_days
+  );
+
+  const selectedDigest = DIGEST_OPTIONS.find(
+    (d) => d.value === settings?.digest_frequency
   );
 
   return (
@@ -133,24 +140,41 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      {/* Notification Preferences */}
+      {/* Push Notifications */}
       <View style={styles.card}>
         <View style={styles.cardHeader}>
-          <Ionicons name="notifications-outline" size={22} color="#18181b" />
-          <Text style={styles.cardTitle}>Notification Preferences</Text>
+          <Ionicons name="phone-portrait-outline" size={22} color="#18181b" />
+          <Text style={styles.cardTitle}>Push Notifications</Text>
           {saving && <ActivityIndicator size="small" color="#6b7280" style={{ marginLeft: 8 }} />}
         </View>
 
         <View style={styles.settingRow}>
           <View style={styles.settingInfo}>
-            <Text style={styles.settingLabel}>Email Notifications</Text>
+            <Text style={styles.settingLabel}>Push Notifications</Text>
             <Text style={styles.settingDescription}>
-              Receive email alerts for your cases
+              Receive push alerts on this device
             </Text>
           </View>
           <Switch
-            value={settings?.email_enabled ?? false}
-            onValueChange={(v) => saveSettings({ email_enabled: v })}
+            value={settings?.push_enabled ?? true}
+            onValueChange={(v) => saveSettings({ push_enabled: v })}
+            trackColor={{ false: "#d1d5db", true: "#18181b" }}
+            thumbColor="#fff"
+          />
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>Case Updates</Text>
+            <Text style={styles.settingDescription}>
+              Get notified when case details change
+            </Text>
+          </View>
+          <Switch
+            value={settings?.case_updates_enabled ?? false}
+            onValueChange={(v) => saveSettings({ case_updates_enabled: v })}
             trackColor={{ false: "#d1d5db", true: "#18181b" }}
             thumbColor="#fff"
           />
@@ -203,33 +227,84 @@ export default function SettingsScreen() {
             ))}
           </View>
         )}
+      </View>
+
+      {/* Email & Digest */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Ionicons name="mail-outline" size={22} color="#18181b" />
+          <Text style={styles.cardTitle}>Email & Digest</Text>
+        </View>
+
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>Email Notifications</Text>
+            <Text style={styles.settingDescription}>
+              Receive email alerts for your cases
+            </Text>
+          </View>
+          <Switch
+            value={settings?.email_enabled ?? false}
+            onValueChange={(v) => saveSettings({ email_enabled: v })}
+            trackColor={{ false: "#d1d5db", true: "#18181b" }}
+            thumbColor="#fff"
+          />
+        </View>
 
         <View style={styles.divider} />
 
         <View style={styles.settingRow}>
           <View style={styles.settingInfo}>
-            <Text style={styles.settingLabel}>Case Updates</Text>
+            <Text style={styles.settingLabel}>Digest Summary</Text>
             <Text style={styles.settingDescription}>
-              Get notified when case details change
+              Receive a summary of case activity
             </Text>
           </View>
-          <Switch
-            value={settings?.case_updates_enabled ?? false}
-            onValueChange={(v) => saveSettings({ case_updates_enabled: v })}
-            trackColor={{ false: "#d1d5db", true: "#18181b" }}
-            thumbColor="#fff"
-          />
+          <TouchableOpacity
+            style={styles.reminderPicker}
+            onPress={() => setShowDigestPicker(!showDigestPicker)}
+          >
+            <Text style={styles.reminderText}>
+              {selectedDigest?.label || "Off"}
+            </Text>
+            <Ionicons name="chevron-down" size={16} color="#6b7280" />
+          </TouchableOpacity>
         </View>
-      </View>
+        {showDigestPicker && (
+          <View style={styles.pickerOptions}>
+            {DIGEST_OPTIONS.map((opt) => (
+              <TouchableOpacity
+                key={opt.value}
+                style={[
+                  styles.pickerOption,
+                  settings?.digest_frequency === opt.value &&
+                    styles.pickerOptionSelected,
+                ]}
+                onPress={() => {
+                  saveSettings({ digest_frequency: opt.value });
+                  setShowDigestPicker(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.pickerOptionText,
+                    settings?.digest_frequency === opt.value &&
+                      styles.pickerOptionTextSelected,
+                  ]}
+                >
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-      {/* Email Integration */}
-      <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Ionicons name="mail-outline" size={22} color="#18181b" />
-          <Text style={styles.cardTitle}>Email Integration</Text>
-        </View>
-        <Text style={styles.settingDescription}>
-          Connect your eTrack email notifications for automatic case updates directly from the court system.
+        <View style={styles.divider} />
+
+        {/* Email Integration Status */}
+        <Text style={styles.settingLabel}>Court Email Integration</Text>
+        <Text style={[styles.settingDescription, { marginBottom: 8 }]}>
+          Forward eTrack notifications for automatic case updates
         </Text>
         <View style={styles.emailStatusRow}>
           <View style={[styles.emailStatusDot, { backgroundColor: emailStatus?.configured ? (emailStatus?.verified ? '#22c55e' : '#f59e0b') : '#d1d5db' }]} />

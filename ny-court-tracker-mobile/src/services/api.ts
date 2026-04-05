@@ -137,8 +137,11 @@ export interface NotificationSettings {
   id: number;
   user_id: number;
   email_enabled: boolean;
+  push_enabled: boolean;
   reminder_days: number;
   case_updates_enabled: boolean;
+  digest_frequency: string;
+  digest_time: string;
 }
 
 export interface NotificationItem {
@@ -150,7 +153,22 @@ export interface NotificationItem {
   title: string;
   message: string;
   read: boolean;
+  push_sent: boolean;
   created_at: string;
+}
+
+export interface PushTokenData {
+  token: string;
+  device_name?: string;
+  platform?: string;
+}
+
+export interface CaseNotificationPrefs {
+  case_id: number;
+  user_id: number;
+  push_enabled: boolean;
+  email_enabled: boolean;
+  priority_override: string | null;
 }
 
 // Auth
@@ -332,9 +350,26 @@ export const notificationsApi = {
     api.get<NotificationSettings>("/api/notifications/settings"),
   updateSettings: (data: Partial<NotificationSettings>) =>
     api.put<NotificationSettings>("/api/notifications/settings", data),
-  list: () => api.get<NotificationItem[]>("/api/notifications"),
+  list: (params?: { notification_type?: string; unread_only?: boolean; limit?: number }) =>
+    api.get<NotificationItem[]>("/api/notifications", { params }),
   markRead: (id: number) => api.put(`/api/notifications/${id}/read`),
   markAllRead: () => api.put("/api/notifications/read-all"),
+  deleteNotification: (id: number) => api.delete(`/api/notifications/${id}`),
+  clearAll: () => api.delete("/api/notifications"),
+  getUnreadCount: () =>
+    api.get<{ count: number }>("/api/notifications/unread-count"),
+  // Push tokens
+  registerPushToken: (data: PushTokenData) =>
+    api.post("/api/notifications/push-token", data),
+  unregisterPushToken: (token: string) =>
+    api.delete("/api/notifications/push-token", { params: { token } }),
+  // Per-case notification preferences
+  getCasePrefs: (caseId: number) =>
+    api.get<CaseNotificationPrefs>(`/api/notifications/case/${caseId}/prefs`),
+  updateCasePrefs: (caseId: number, data: Partial<CaseNotificationPrefs>) =>
+    api.put<CaseNotificationPrefs>(`/api/notifications/case/${caseId}/prefs`, data),
+  // Trigger checks (testing)
+  triggerChecks: () => api.post("/api/notifications/trigger-checks"),
 };
 
 export const setApiUrl = (url: string) => {

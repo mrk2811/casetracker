@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
-from datetime import date, datetime
+from datetime import date
 
 
 # ─── Auth ───
@@ -233,16 +233,22 @@ class CourtConfigOut(BaseModel):
 # ─── Notifications ───
 class NotificationSettingsUpdate(BaseModel):
     email_enabled: Optional[bool] = None
+    push_enabled: Optional[bool] = None
     reminder_days: Optional[int] = None
     case_updates_enabled: Optional[bool] = None
+    digest_frequency: Optional[str] = None  # 'off', 'daily', 'weekly'
+    digest_time: Optional[str] = None  # HH:MM format
 
 
 class NotificationSettingsOut(BaseModel):
     id: int
     user_id: int
     email_enabled: bool
+    push_enabled: bool = True
     reminder_days: int
     case_updates_enabled: bool
+    digest_frequency: str = "off"
+    digest_time: str = "08:00"
 
 
 class NotificationOut(BaseModel):
@@ -254,7 +260,42 @@ class NotificationOut(BaseModel):
     title: str
     message: str
     read: bool
+    push_sent: bool = False
     created_at: str
+
+
+class PushTokenRegister(BaseModel):
+    token: str
+    device_name: Optional[str] = None
+    platform: Optional[str] = None
+
+
+class PushTokenOut(BaseModel):
+    id: int
+    user_id: int
+    token: str
+    device_name: Optional[str] = None
+    platform: Optional[str] = None
+    active: bool
+    created_at: str
+
+
+class UnreadCountOut(BaseModel):
+    count: int
+
+
+class CaseNotificationPrefsUpdate(BaseModel):
+    push_enabled: Optional[bool] = None
+    email_enabled: Optional[bool] = None
+    priority_override: Optional[str] = None
+
+
+class CaseNotificationPrefsOut(BaseModel):
+    case_id: int
+    user_id: int
+    push_enabled: bool = True
+    email_enabled: bool = True
+    priority_override: Optional[str] = None
 
 
 # ─── Email Integration ───

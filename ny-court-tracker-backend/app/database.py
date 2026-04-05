@@ -149,8 +149,11 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER UNIQUE NOT NULL,
                 email_enabled INTEGER DEFAULT 1,
+                push_enabled INTEGER DEFAULT 1,
                 reminder_days INTEGER DEFAULT 1,
                 case_updates_enabled INTEGER DEFAULT 1,
+                digest_frequency TEXT DEFAULT 'off',
+                digest_time TEXT DEFAULT '08:00',
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
@@ -163,10 +166,35 @@ def init_db():
                 title TEXT NOT NULL,
                 message TEXT NOT NULL,
                 read INTEGER DEFAULT 0,
+                push_sent INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
                 FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE SET NULL,
                 FOREIGN KEY (appearance_id) REFERENCES appearances(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS push_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                device_name TEXT,
+                platform TEXT,
+                active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS case_notification_prefs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                push_enabled INTEGER DEFAULT 1,
+                email_enabled INTEGER DEFAULT 1,
+                priority_override TEXT,
+                UNIQUE(case_id, user_id),
+                FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
         """)
 
@@ -189,6 +217,22 @@ def init_db():
         if "source" not in app_cols:
             conn.execute("ALTER TABLE appearances ADD COLUMN source TEXT DEFAULT 'manual'")
 
+        # Migrate notification_settings table
+        ns_cols = {row[1] for row in conn.execute("PRAGMA table_info(notification_settings)").fetchall()}
+        ns_migrations = [
+            ("push_enabled", "ALTER TABLE notification_settings ADD COLUMN push_enabled INTEGER DEFAULT 1"),
+            ("digest_frequency", "ALTER TABLE notification_settings ADD COLUMN digest_frequency TEXT DEFAULT 'off'"),
+            ("digest_time", "ALTER TABLE notification_settings ADD COLUMN digest_time TEXT DEFAULT '08:00'"),
+        ]
+        for col_name, alter_sql in ns_migrations:
+            if col_name not in ns_cols:
+                conn.execute(alter_sql)
+
+        # Migrate notifications table
+        notif_cols = {row[1] for row in conn.execute("PRAGMA table_info(notifications)").fetchall()}
+        if "push_sent" not in notif_cols:
+            conn.execute("ALTER TABLE notifications ADD COLUMN push_sent INTEGER DEFAULT 0")
+
         # Step 3: Create indexes (after migrations so columns exist)
         conn.executescript("""
             CREATE INDEX IF NOT EXISTS idx_cases_user_id ON cases(user_id);
@@ -201,6 +245,10 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_scrape_jobs_case_id ON scrape_jobs(case_id);
             CREATE INDEX IF NOT EXISTS idx_scrape_jobs_status ON scrape_jobs(status);
             CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+            CREATE INDEX IF NOT EXISTS idx_push_tokens_user_id ON push_tokens(user_id);
+            CREATE INDEX IF NOT EXISTS idx_push_tokens_token ON push_tokens(token);
+            CREATE INDEX IF NOT EXISTS idx_case_notification_prefs_case ON case_notification_prefs(case_id);
+            CREATE INDEX IF NOT EXISTS idx_case_notification_prefs_user ON case_notification_prefs(user_id);
             CREATE INDEX IF NOT EXISTS idx_email_configs_user_id ON email_configs(user_id);
             CREATE INDEX IF NOT EXISTS idx_email_configs_inbound ON email_configs(inbound_email);
             CREATE INDEX IF NOT EXISTS idx_email_log_user_id ON email_log(user_id);

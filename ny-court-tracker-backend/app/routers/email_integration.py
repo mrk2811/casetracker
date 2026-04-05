@@ -6,7 +6,7 @@ and email configuration management.
 """
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request, Form
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Optional
 
 from app.database import get_db
@@ -15,7 +15,6 @@ from app.email.webhook import (
     setup_user_email,
     verify_forwarding,
     process_sendgrid_webhook,
-    get_user_id_from_inbound_email,
 )
 from app.schemas import (
     EmailSetupResponse,

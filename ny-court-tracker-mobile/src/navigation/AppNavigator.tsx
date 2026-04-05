@@ -1,10 +1,12 @@
-import React from "react";
-import { ActivityIndicator, View } from "react-native";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+import { ActivityIndicator, View, Text, StyleSheet } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
+import { notificationsApi } from "../services/api";
+import { registerForPushNotifications, setupNotificationResponseListener } from "../services/pushNotifications";
 
 import LoginScreen from "../screens/LoginScreen";
 import RegisterScreen from "../screens/RegisterScreen";
@@ -42,6 +44,47 @@ function SettingsStackNavigator() {
 }
 
 function MainTabs() {
+  const [unreadCount, setUnreadCount] = useState(0);
+  const navigationRef = useRef<any>(null);
+
+  // Fetch unread count periodically
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const res = await notificationsApi.getUnreadCount();
+      setUnreadCount(res.data.count);
+    } catch {
+      // Silently fail
+    }
+  }, []);
+
+  useEffect(() => {
+    // Register for push notifications on mount
+    registerForPushNotifications();
+
+    // Fetch initial unread count
+    fetchUnreadCount();
+
+    // Poll every 60 seconds
+    const interval = setInterval(fetchUnreadCount, 60000);
+
+    // Handle notification taps - navigate to relevant case
+    const cleanup = setupNotificationResponseListener((data) => {
+      if (data.case_id && navigationRef.current) {
+        navigationRef.current.navigate("CasesTab", {
+          screen: "CaseDetail",
+          params: { id: data.case_id },
+        });
+      } else if (navigationRef.current) {
+        navigationRef.current.navigate("Notifications");
+      }
+    });
+
+    return () => {
+      clearInterval(interval);
+      cleanup();
+    };
+  }, [fetchUnreadCount]);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -59,7 +102,7 @@ function MainTabs() {
           fontSize: 11,
           fontWeight: "500" as const,
         },
-        tabBarIcon: ({ focused, color, size }) => {
+        tabBarIcon: ({ focused, color }) => {
           let iconName: keyof typeof Ionicons.glyphMap = "help-outline";
           switch (route.name) {
             case "Dashboard":
@@ -89,11 +132,35 @@ function MainTabs() {
         options={{ tabBarLabel: "Cases" }}
       />
       <Tab.Screen name="Calendar" component={CalendarScreen} />
-      <Tab.Screen name="Notifications" component={NotificationsScreen} />
+      <Tab.Screen
+        name="Notifications"
+        component={NotificationsScreen}
+        listeners={{
+          tabPress: () => {
+            // Refresh unread count when switching to notifications tab
+            fetchUnreadCount();
+          },
+        }}
+        options={{
+          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
+          tabBarBadgeStyle: badgeStyles.badge,
+        }}
+      />
       <Tab.Screen name="Settings" component={SettingsStackNavigator} />
     </Tab.Navigator>
   );
 }
+
+const badgeStyles = StyleSheet.create({
+  badge: {
+    backgroundColor: "#ef4444",
+    fontSize: 10,
+    fontWeight: "600",
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+  },
+});
 
 export default function AppNavigator() {
   const { user, loading } = useAuth();
