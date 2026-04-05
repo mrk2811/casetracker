@@ -584,6 +584,47 @@ class NYWebCivilAdapter(CourtAdapter):
         )
         return appearances
 
+    async def search_by_attorney(
+        self, attorney_name: str, attorney_reg_number: Optional[str] = None, county: Optional[str] = None
+    ) -> list[CourtRecord]:
+        """
+        Search NY WebCivil for cases associated with an attorney.
+
+        WebCivil supports searching by attorney/firm name as a party name search.
+        We search both plaintiff and defendant fields with the attorney name
+        to find cases where the attorney's firm appears.
+        """
+        engine = self._get_engine()
+        all_records: list[CourtRecord] = []
+
+        # Search by attorney name as plaintiff firm
+        params_plaintiff = SearchParams(
+            plaintiff=attorney_name,
+            county=county,
+        )
+        results_p = await self._search_by_party(engine, params_plaintiff)
+        all_records.extend(results_p)
+
+        # Also search by attorney name as defendant
+        params_defendant = SearchParams(
+            defendant=attorney_name,
+            county=county,
+        )
+        results_d = await self._search_by_party(engine, params_defendant)
+
+        # Deduplicate by index_number
+        seen = {r.index_number for r in all_records}
+        for r in results_d:
+            if r.index_number not in seen:
+                all_records.append(r)
+                seen.add(r.index_number)
+
+        logger.info(
+            "NYWebCivil attorney search for '%s' found %d cases",
+            attorney_name, len(all_records),
+        )
+        return all_records
+
     async def health_check(self) -> bool:
         """Check if NY WebCivil is accessible."""
         engine = self._get_engine()

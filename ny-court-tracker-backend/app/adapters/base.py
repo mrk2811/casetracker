@@ -67,6 +67,7 @@ class SearchParams:
     plaintiff: Optional[str] = None
     defendant: Optional[str] = None
     attorney_name: Optional[str] = None
+    attorney_reg_number: Optional[str] = None
     state: str = "NY"
 
 
@@ -119,6 +120,31 @@ class CourtAdapter(ABC):
         Fetch all scheduled appearances for a case.
         """
         ...
+
+    async def search_by_attorney(
+        self, attorney_name: str, attorney_reg_number: Optional[str] = None, county: Optional[str] = None
+    ) -> list[CourtRecord]:
+        """
+        Search the court system for cases associated with an attorney.
+
+        Used by weekly case detection to find new cases under an attorney's name.
+        Default implementation searches by party name; adapters can override
+        with more specific attorney search if supported.
+
+        Args:
+            attorney_name: Attorney's full name
+            attorney_reg_number: Attorney registration number (if available)
+            county: Optional county to narrow search
+
+        Returns:
+            List of case records found under this attorney
+        """
+        # Default: search by attorney name as party name
+        params = SearchParams(
+            plaintiff=attorney_name,
+            county=county,
+        )
+        return await self.search(params)
 
     @abstractmethod
     async def health_check(self) -> bool:

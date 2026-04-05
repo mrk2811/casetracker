@@ -344,6 +344,67 @@ export const emailApi = {
     api.post("/api/email/webhook/test", null, { params: data }),
 };
 
+// Discovery
+export interface DiscoverySettings {
+  id: number;
+  user_id: number;
+  enabled: boolean;
+  attorney_name: string | null;
+  attorney_reg_number: string | null;
+  search_courts: string;
+  search_county: string | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+}
+
+export interface DiscoveredCase {
+  id: number;
+  user_id: number;
+  index_number: string;
+  court_type: string;
+  county: string | null;
+  court_system: string | null;
+  plaintiff: string | null;
+  defendant: string | null;
+  case_status: string | null;
+  last_action: string | null;
+  last_action_date: string | null;
+  source_adapter: string | null;
+  status: string;
+  notification_id: number | null;
+  discovered_at: string;
+  resolved_at: string | null;
+}
+
+export interface DiscoveryAcceptResponse {
+  status: string;
+  case_id: number | null;
+  message: string;
+}
+
+export interface DiscoveryRunResponse {
+  users_checked: number;
+  total_discoveries: number;
+  errors: number;
+}
+
+export const discoveryApi = {
+  getSettings: () =>
+    api.get<DiscoverySettings>("/api/discovery/settings"),
+  updateSettings: (data: Partial<DiscoverySettings>) =>
+    api.put<DiscoverySettings>("/api/discovery/settings", data),
+  list: (params?: { status?: string; limit?: number }) =>
+    api.get<DiscoveredCase[]>("/api/discovery", { params }),
+  getPendingCount: () =>
+    api.get<{ count: number }>("/api/discovery/pending-count"),
+  accept: (discoveryId: number) =>
+    api.post<DiscoveryAcceptResponse>(`/api/discovery/${discoveryId}/accept`),
+  dismiss: (discoveryId: number) =>
+    api.post<{ status: string; message: string }>(`/api/discovery/${discoveryId}/dismiss`),
+  trigger: () =>
+    api.post<DiscoveryRunResponse>("/api/discovery/trigger"),
+};
+
 // Notifications
 export const notificationsApi = {
   getSettings: () =>
