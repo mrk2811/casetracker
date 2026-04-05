@@ -229,6 +229,44 @@ export const courtConfigsApi = {
   adapters: () => api.get("/api/court-configs/adapters"),
 };
 
+// Scraper
+export interface ScrapeJobResponse {
+  id: number;
+  case_id: number;
+  court_system: string;
+  status: string;
+  scheduled_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  result: string | null;
+  error_message: string | null;
+  created_at: string | null;
+}
+
+export interface ScraperStatusResponse {
+  scheduler_running: boolean;
+  jobs: { id: string; name: string; next_run: string | null }[];
+  total_scrape_jobs: number;
+  recent_failures: number;
+}
+
+export interface ManualScrapeResponse {
+  status: string;
+  case_id: number;
+  last_action: string | null;
+  error_message: string | null;
+}
+
+export const scraperApi = {
+  getStatus: () => api.get<ScraperStatusResponse>("/api/scraper/status"),
+  triggerManual: (caseId: number) =>
+    api.post<ManualScrapeResponse>("/api/scraper/trigger-manual", { case_id: caseId }),
+  getHistory: (caseId: number, limit?: number) =>
+    api.get<ScrapeJobResponse[]>(`/api/scraper/history/${caseId}`, { params: { limit: limit || 20 } }),
+  triggerBatch: (priority: string) =>
+    api.post("/api/scraper/trigger-batch", null, { params: { priority } }),
+};
+
 // Notifications
 export const notificationsApi = {
   getSettings: () =>

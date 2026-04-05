@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { casesApi } from "../services/api";
+import { casesApi, CaseSearchResult } from "../services/api";
 
 const COURT_TYPES = [
   { value: "supreme", label: "Civil Supreme Court" },
@@ -41,6 +41,11 @@ const NY_COUNTIES = [
   "Warren", "Washington", "Wayne", "Westchester", "Wyoming", "Yates",
 ];
 
+function getCourtSystem(courtType: string): string {
+  if (courtType === "criminal") return "ny_webcrimin";
+  return "ny_webcivil";
+}
+
 export default function CaseFormScreen({ route, navigation }: any) {
   const editId = route.params?.id;
   const isEditing = !!editId;
@@ -66,6 +71,13 @@ export default function CaseFormScreen({ route, navigation }: any) {
   const [showCountyPicker, setShowCountyPicker] = useState(false);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
   const [showPriorityPicker, setShowPriorityPicker] = useState(false);
+
+  // Verification flow state
+  const [searching, setSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<CaseSearchResult[]>([]);
+  const [searchMessage, setSearchMessage] = useState<string | null>(null);
+  const [showVerification, setShowVerification] = useState(false);
+  const [selectedResult, setSelectedResult] = useState<CaseSearchResult | null>(null);
 
   useEffect(() => {
     if (isEditing) {
@@ -97,6 +109,87 @@ export default function CaseFormScreen({ route, navigation }: any) {
 
   const updateForm = (key: string, value: string) => {
     setForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSearch = async () => {
+    if (!form.index_number || !form.county) {
+      Alert.alert("Required Fields", "Please enter an Index Number and select a County before searching.");
+      return;
+    }
+    setSearching(true);
+    setSearchResults([]);
+    setSearchMessage(null);
+    setSelectedResult(null);
+    try {
+      const courtSystem = getCourtSystem(form.court_type);
+      const res = await casesApi.search({
+        index_number: form.index_number,
+        court_type: form.court_type,
+        county: form.county,
+        court_system: courtSystem,
+      });
+      setSearchResults(res.data.results);
+      setSearchMessage(res.data.message);
+      setShowVerification(true);
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || "Failed to search court system";
+      Alert.alert("Search Error", msg);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSelectResult = (result: CaseSearchResult) => {
+    setSelectedResult(result);
+    setForm((prev) => ({
+      ...prev,
+      index_number: result.index_number || prev.index_number,
+      court_type: result.court_type || prev.court_type,
+      county: result.county || prev.county,
+      case_year: result.case_year ? String(result.case_year) : prev.case_year,
+      case_status: result.case_status || prev.case_status,
+      plaintiff: result.plaintiff || prev.plaintiff,
+      defendant: result.defendant || prev.defendant,
+      plaintiff_firm: result.plaintiff_firm || prev.plaintiff_firm,
+      defendant_firm: result.defendant_firm || prev.defendant_firm,
+      justice: result.justice || prev.justice,
+      part: result.part || prev.part,
+    }));
+  };
+
+  const handleVerifiedSubmit = async () => {
+    if (!selectedResult) return;
+    setSaving(true);
+    try {
+      const courtSystem = getCourtSystem(form.court_type);
+      await casesApi.verify({
+        court_type: form.court_type,
+        county: form.county,
+        index_number: form.index_number,
+        case_year: form.case_year ? parseInt(form.case_year) : null,
+        case_status: form.case_status,
+        priority: form.priority,
+        plaintiff: form.plaintiff || null,
+        defendant: form.defendant || null,
+        plaintiff_firm: form.plaintiff_firm || null,
+        defendant_firm: form.defendant_firm || null,
+        justice: form.justice || null,
+        part: form.part || null,
+        notes: form.notes || null,
+        court_system: courtSystem,
+        search_params: JSON.stringify({
+          index_number: form.index_number,
+          county: form.county,
+          court_type: form.court_type,
+        }),
+      });
+      navigation.goBack();
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || "Failed to save verified case";
+      Alert.alert("Error", msg);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -147,6 +240,147 @@ export default function CaseFormScreen({ route, navigation }: any) {
   const selectedCourt = COURT_TYPES.find((c) => c.value === form.court_type);
   const selectedStatus = STATUSES.find((s) => s.value === form.case_status);
   const selectedPriority = PRIORITIES.find((p) => p.value === form.priority);
+
+  // Verification results view
+  if (showVerification) {
+    return (
+      <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => {
+            setShowVerification(false);
+            setSearchResults([]);
+            setSelectedResult(null);
+          }}
+        >
+          <Ionicons name="arrow-back" size={20} color="#18181b" />
+          <Text style={styles.backButtonText}>Back to Form</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.title}>Verify Case</Text>
+        <Text style={styles.subtitle}>
+          {searchMessage || "Review the search results below"}
+        </Text>
+
+        {searchResults.length === 0 ? (
+          <View style={styles.noResults}>
+            <Ionicons name="search-outline" size={40} color="#d1d5db" />
+            <Text style={styles.noResultsTitle}>No Cases Found</Text>
+            <Text style={styles.noResultsText}>
+              The scraper could not find a matching case. You can still add it manually.
+            </Text>
+            <TouchableOpacity
+              style={styles.manualButton}
+              onPress={() => {
+                setShowVerification(false);
+                setSearchResults([]);
+              }}
+            >
+              <Text style={styles.manualButtonText}>Add Manually</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {searchResults.map((result, index) => {
+              const isSelected = selectedResult === result;
+              return (
+                <TouchableOpacity
+                  key={index}
+                  style={[styles.resultCard, isSelected && styles.resultCardSelected]}
+                  onPress={() => handleSelectResult(result)}
+                >
+                  <View style={styles.resultHeader}>
+                    <View style={styles.resultBadgeRow}>
+                      <View style={styles.resultIndexBadge}>
+                        <Text style={styles.resultIndexText}>{result.index_number}</Text>
+                      </View>
+                      {isSelected && (
+                        <Ionicons name="checkmark-circle" size={20} color="#10b981" />
+                      )}
+                    </View>
+                  </View>
+
+                  {(result.plaintiff || result.defendant) && (
+                    <Text style={styles.resultParties}>
+                      {result.plaintiff || "Unknown"} v. {result.defendant || "Unknown"}
+                    </Text>
+                  )}
+
+                  <View style={styles.resultDetails}>
+                    {result.county && (
+                      <View style={styles.resultDetailRow}>
+                        <Text style={styles.resultDetailLabel}>County:</Text>
+                        <Text style={styles.resultDetailValue}>{result.county}</Text>
+                      </View>
+                    )}
+                    {result.justice && (
+                      <View style={styles.resultDetailRow}>
+                        <Text style={styles.resultDetailLabel}>Justice:</Text>
+                        <Text style={styles.resultDetailValue}>{result.justice}</Text>
+                      </View>
+                    )}
+                    {result.case_status && (
+                      <View style={styles.resultDetailRow}>
+                        <Text style={styles.resultDetailLabel}>Status:</Text>
+                        <Text style={styles.resultDetailValue}>{result.case_status}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {result.last_action && (
+                    <View style={styles.lastActionBox}>
+                      <Ionicons name="document-text-outline" size={14} color="#6b7280" />
+                      <Text style={styles.lastActionText}>
+                        Last Action: {result.last_action}
+                        {result.last_action_date ? ` (${result.last_action_date})` : ""}
+                      </Text>
+                    </View>
+                  )}
+
+                  {isSelected && (
+                    <Text style={styles.selectedHint}>
+                      Does this match your case? Tap "Track This Case" below to confirm.
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+
+            {selectedResult && (
+              <View style={styles.verifyActions}>
+                <TouchableOpacity
+                  style={[styles.verifyButton, saving && styles.buttonDisabled]}
+                  onPress={handleVerifiedSubmit}
+                  disabled={saving}
+                >
+                  {saving ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                      <Text style={styles.verifyButtonText}>Track This Case</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.manualButton}
+                  onPress={() => {
+                    setShowVerification(false);
+                    setSearchResults([]);
+                    setSelectedResult(null);
+                  }}
+                >
+                  <Text style={styles.manualButtonText}>Edit Details First</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </>
+        )}
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
@@ -253,6 +487,30 @@ export default function CaseFormScreen({ route, navigation }: any) {
           />
         </View>
       </View>
+
+      {/* Search & Verify Button - only for new cases */}
+      {!isEditing && (
+        <TouchableOpacity
+          style={[styles.searchButton, searching && styles.buttonDisabled]}
+          onPress={handleSearch}
+          disabled={searching}
+        >
+          {searching ? (
+            <ActivityIndicator color="#fff" size="small" />
+          ) : (
+            <>
+              <Ionicons name="search" size={16} color="#fff" />
+              <Text style={styles.searchButtonText}>Search & Verify Case</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+
+      {!isEditing && (
+        <Text style={styles.searchHint}>
+          Search the court system to verify and auto-fill case details, or fill in manually below.
+        </Text>
+      )}
 
       <Text style={styles.label}>Status</Text>
       <TouchableOpacity
@@ -520,4 +778,115 @@ const styles = StyleSheet.create({
   cancelText: { color: "#6b7280", fontSize: 16 },
   priorityPickerContent: { flexDirection: "row", alignItems: "center", gap: 6 },
   priorityDescription: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
+  searchButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#3b82f6",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 16,
+  },
+  searchButtonText: { color: "#fff", fontSize: 15, fontWeight: "600" },
+  searchHint: {
+    fontSize: 12,
+    color: "#9ca3af",
+    textAlign: "center",
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 16,
+  },
+  backButtonText: { fontSize: 15, color: "#18181b", fontWeight: "500" },
+  noResults: {
+    alignItems: "center",
+    paddingVertical: 40,
+  },
+  noResultsTitle: { fontSize: 18, fontWeight: "600", color: "#18181b", marginTop: 12 },
+  noResultsText: { fontSize: 14, color: "#6b7280", textAlign: "center", marginTop: 8, paddingHorizontal: 20 },
+  resultCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: "#e5e7eb",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  resultCardSelected: {
+    borderColor: "#10b981",
+    backgroundColor: "#f0fdf4",
+  },
+  resultHeader: { marginBottom: 8 },
+  resultBadgeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  resultIndexBadge: {
+    backgroundColor: "#18181b",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  resultIndexText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+  resultParties: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#18181b",
+    marginBottom: 8,
+  },
+  resultDetails: { gap: 4 },
+  resultDetailRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  resultDetailLabel: { fontSize: 13, color: "#6b7280", fontWeight: "500" },
+  resultDetailValue: { fontSize: 13, color: "#18181b" },
+  lastActionBox: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+    backgroundColor: "#f3f4f6",
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 10,
+  },
+  lastActionText: { fontSize: 13, color: "#374151", flex: 1 },
+  selectedHint: {
+    fontSize: 13,
+    color: "#10b981",
+    fontWeight: "500",
+    marginTop: 10,
+    textAlign: "center",
+  },
+  verifyActions: { gap: 10, marginTop: 8 },
+  verifyButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#10b981",
+    borderRadius: 8,
+    padding: 14,
+  },
+  verifyButtonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  manualButton: {
+    borderRadius: 8,
+    padding: 14,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    backgroundColor: "#fff",
+  },
+  manualButtonText: { color: "#374151", fontSize: 15, fontWeight: "500" },
 });

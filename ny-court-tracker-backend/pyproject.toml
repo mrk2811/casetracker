@@ -15,6 +15,10 @@ python-dotenv = "^1.2.2"
 pydantic = {extras = ["email"], version = "^2.12.5"}
 apscheduler = "^3.11.2"
 aiosmtplib = "^5.1.0"
+httpx = "^0.28.1"
+beautifulsoup4 = "^4.14.3"
+lxml = "^6.0.2"
+tzdata = "^2026.1"
 
 
 [build-system]

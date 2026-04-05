@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { casesApi, appearancesApi, Case, Appearance, FreshnessInfo } from "../services/api";
+import { casesApi, appearancesApi, scraperApi, Case, Appearance, FreshnessInfo } from "../services/api";
 
 const FRESHNESS_COLORS: Record<string, string> = {
   fresh: "#10b981",
@@ -76,6 +76,7 @@ export default function CaseDetailScreen({ route, navigation }: any) {
     location: "",
     notes: "",
   });
+  const [scraping, setScraping] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -138,6 +139,33 @@ export default function CaseDetailScreen({ route, navigation }: any) {
       Alert.alert("Error", "Failed to add appearance");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleManualScrape = async () => {
+    if (!caseData) return;
+    setScraping(true);
+    try {
+      const res = await scraperApi.triggerManual(caseData.id);
+      if (res.data.status === "success") {
+        Alert.alert(
+          "Scrape Complete",
+          res.data.last_action
+            ? `Latest action found: ${res.data.last_action}`
+            : "Case data has been refreshed."
+        );
+        fetchData();
+      } else {
+        Alert.alert(
+          "Scrape Issue",
+          res.data.error_message || "Could not scrape case data. The court site may be unavailable."
+        );
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || "Failed to trigger scrape";
+      Alert.alert("Error", msg);
+    } finally {
+      setScraping(false);
     }
   };
 
@@ -344,6 +372,23 @@ export default function CaseDetailScreen({ route, navigation }: any) {
             </View>
           </>
         )}
+
+        {/* Manual Scrape Button */}
+        <View style={styles.divider} />
+        <TouchableOpacity
+          style={[styles.scrapeButton, scraping && styles.scrapeButtonDisabled]}
+          onPress={handleManualScrape}
+          disabled={scraping}
+        >
+          {scraping ? (
+            <ActivityIndicator color="#3b82f6" size="small" />
+          ) : (
+            <Ionicons name="refresh" size={16} color="#3b82f6" />
+          )}
+          <Text style={styles.scrapeButtonText}>
+            {scraping ? "Checking court system..." : "Check for Updates Now"}
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Appearances */}
@@ -572,6 +617,20 @@ const styles = StyleSheet.create({
   },
   freshnessLabel: { fontSize: 13, color: "#374151" },
   freshnessSource: { fontSize: 12, color: "#9ca3af" },
+  scrapeButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#3b82f6",
+    backgroundColor: "#eff6ff",
+  },
+  scrapeButtonDisabled: { opacity: 0.6 },
+  scrapeButtonText: { fontSize: 14, fontWeight: "500", color: "#3b82f6" },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
