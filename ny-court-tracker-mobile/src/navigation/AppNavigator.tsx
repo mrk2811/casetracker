@@ -15,10 +15,12 @@ import CaseFormScreen from "../screens/CaseFormScreen";
 import CalendarScreen from "../screens/CalendarScreen";
 import NotificationsScreen from "../screens/NotificationsScreen";
 import SettingsScreen from "../screens/SettingsScreen";
+import EmailSetupScreen from "../screens/EmailSetupScreen";
 
 const AuthStack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 const CasesStack = createNativeStackNavigator();
+const SettingsStack = createNativeStackNavigator();
 
 function CasesStackNavigator() {
   return (
@@ -27,6 +29,15 @@ function CasesStackNavigator() {
       <CasesStack.Screen name="CaseDetail" component={CaseDetailScreen} />
       <CasesStack.Screen name="CaseForm" component={CaseFormScreen} />
     </CasesStack.Navigator>
+  );
+}
+
+function SettingsStackNavigator() {
+  return (
+    <SettingsStack.Navigator screenOptions={{ headerShown: false }}>
+      <SettingsStack.Screen name="SettingsMain" component={SettingsScreen} />
+      <SettingsStack.Screen name="EmailSetup" component={EmailSetupScreen} />
+    </SettingsStack.Navigator>
   );
 }
 
@@ -79,7 +90,7 @@ function MainTabs() {
       />
       <Tab.Screen name="Calendar" component={CalendarScreen} />
       <Tab.Screen name="Notifications" component={NotificationsScreen} />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
+      <Tab.Screen name="Settings" component={SettingsStackNavigator} />
     </Tab.Navigator>
   );
 }

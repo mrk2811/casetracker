@@ -10,9 +10,9 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
-import { notificationsApi, NotificationSettings } from "../services/api";
+import { notificationsApi, NotificationSettings, emailApi } from "../services/api";
 
 const REMINDER_OPTIONS = [
   { value: 1, label: "1 day before" },
@@ -23,10 +23,12 @@ const REMINDER_OPTIONS = [
 
 export default function SettingsScreen() {
   const { user, logout } = useAuth();
+  const navigation = useNavigation<any>();
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showReminderPicker, setShowReminderPicker] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<{ configured: boolean; verified: boolean } | null>(null);
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -40,9 +42,19 @@ export default function SettingsScreen() {
     }
   };
 
+  const fetchEmailStatus = async () => {
+    try {
+      const res = await emailApi.getConfig();
+      setEmailStatus({ configured: true, verified: res.data.forwarding_verified });
+    } catch {
+      setEmailStatus({ configured: false, verified: false });
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       fetchSettings();
+      fetchEmailStatus();
     }, [])
   );
 
@@ -210,6 +222,36 @@ export default function SettingsScreen() {
         </View>
       </View>
 
+      {/* Email Integration */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Ionicons name="mail-outline" size={22} color="#18181b" />
+          <Text style={styles.cardTitle}>Email Integration</Text>
+        </View>
+        <Text style={styles.settingDescription}>
+          Connect your eTrack email notifications for automatic case updates directly from the court system.
+        </Text>
+        <View style={styles.emailStatusRow}>
+          <View style={[styles.emailStatusDot, { backgroundColor: emailStatus?.configured ? (emailStatus?.verified ? '#22c55e' : '#f59e0b') : '#d1d5db' }]} />
+          <Text style={styles.emailStatusText}>
+            {emailStatus?.configured
+              ? emailStatus?.verified
+                ? 'Connected & Verified'
+                : 'Set Up - Awaiting Verification'
+              : 'Not Connected'}
+          </Text>
+        </View>
+        <TouchableOpacity
+          style={styles.emailSetupButton}
+          onPress={() => navigation.navigate('EmailSetup')}
+        >
+          <Ionicons name="settings-outline" size={18} color="#fff" />
+          <Text style={styles.emailSetupButtonText}>
+            {emailStatus?.configured ? 'Manage Email Integration' : 'Set Up Email Integration'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Sign Out */}
       <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={20} color="#ef4444" />
@@ -294,4 +336,36 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   signOutText: { fontSize: 16, fontWeight: "500", color: "#ef4444" },
+  emailStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 12,
+  },
+  emailStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  emailStatusText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#374151",
+  },
+  emailSetupButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#18181b",
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  emailSetupButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
 });
