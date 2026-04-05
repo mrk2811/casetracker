@@ -255,3 +255,64 @@ class NotificationOut(BaseModel):
     message: str
     read: bool
     created_at: str
+
+
+# ─── Email Integration ───
+class EmailSetupResponse(BaseModel):
+    """Response from email setup endpoint."""
+    inbound_email: str
+    forwarding_verified: bool
+    provider: Optional[str] = None
+    already_setup: bool = False
+
+
+class EmailConfigOut(BaseModel):
+    """Email configuration for a user."""
+    id: int
+    user_id: int
+    inbound_email: str
+    forwarding_verified: bool
+    provider: Optional[str] = None
+    created_at: str
+
+
+class EmailVerifyResponse(BaseModel):
+    """Response from email verification endpoint."""
+    verified: bool
+    inbound_email: Optional[str] = None
+
+
+class EmailSetupGuideStep(BaseModel):
+    """A single step in the email setup guide."""
+    step: int
+    title: str
+    description: str
+    url: Optional[str] = None
+    completed: bool = False
+
+
+class EmailSetupGuide(BaseModel):
+    """Complete email setup guide with instructions."""
+    inbound_email: Optional[str] = None
+    forwarding_verified: bool = False
+    steps: list[EmailSetupGuideStep]
+    gmail_instructions: str
+    outlook_instructions: str
+    privacy_note: str
+
+
+class EmailWebhookResponse(BaseModel):
+    """Response from email webhook processing."""
+    status: str
+    events_found: int = 0
+    message: str = ""
+    results: list[dict] = []
+
+
+class EmailLogOut(BaseModel):
+    """Email processing log entry."""
+    id: int
+    sender: Optional[str] = None
+    subject: Optional[str] = None
+    events_extracted: int = 0
+    received_at: str

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, DB_PATH
 from app.routers import auth, cases, appearances, dashboard, notifications, court_configs
 from app.routers.scraper import router as scraper_router
+from app.routers.email_integration import router as email_router
 from app.scraper.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -44,3 +45,4 @@ app.include_router(dashboard.router)
 app.include_router(notifications.router)
 app.include_router(court_configs.router)
 app.include_router(scraper_router)
+app.include_router(email_router)

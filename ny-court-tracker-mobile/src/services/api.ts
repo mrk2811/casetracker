@@ -267,6 +267,65 @@ export const scraperApi = {
     api.post("/api/scraper/trigger-batch", null, { params: { priority } }),
 };
 
+// Email Integration
+export interface EmailSetupResponse {
+  inbound_email: string;
+  forwarding_verified: boolean;
+  provider: string | null;
+  already_setup: boolean;
+}
+
+export interface EmailConfigResponse {
+  id: number;
+  user_id: number;
+  inbound_email: string;
+  forwarding_verified: boolean;
+  provider: string | null;
+  created_at: string;
+}
+
+export interface EmailVerifyResponse {
+  verified: boolean;
+  inbound_email: string | null;
+}
+
+export interface EmailSetupGuideStep {
+  step: number;
+  title: string;
+  description: string;
+  url: string | null;
+  completed: boolean;
+}
+
+export interface EmailSetupGuide {
+  inbound_email: string | null;
+  forwarding_verified: boolean;
+  steps: EmailSetupGuideStep[];
+  gmail_instructions: string;
+  outlook_instructions: string;
+  privacy_note: string;
+}
+
+export interface EmailLogEntry {
+  id: number;
+  sender: string | null;
+  subject: string | null;
+  events_extracted: number;
+  received_at: string;
+}
+
+export const emailApi = {
+  setup: () => api.post<EmailSetupResponse>("/api/email/setup"),
+  getConfig: () => api.get<EmailConfigResponse>("/api/email/config"),
+  verify: () => api.post<EmailVerifyResponse>("/api/email/verify"),
+  deleteConfig: () => api.delete("/api/email/config"),
+  getSetupGuide: () => api.get<EmailSetupGuide>("/api/email/setup-guide"),
+  getLog: (limit?: number) =>
+    api.get<EmailLogEntry[]>("/api/email/log", { params: { limit: limit || 20 } }),
+  testWebhook: (data: { sender?: string; subject?: string; text: string }) =>
+    api.post("/api/email/webhook/test", null, { params: data }),
+};
+
 // Notifications
 export const notificationsApi = {
   getSettings: () =>

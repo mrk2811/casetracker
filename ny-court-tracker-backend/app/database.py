@@ -135,6 +135,16 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS email_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                sender TEXT,
+                subject TEXT,
+                events_extracted INTEGER DEFAULT 0,
+                received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS notification_settings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER UNIQUE NOT NULL,
@@ -191,6 +201,9 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_scrape_jobs_case_id ON scrape_jobs(case_id);
             CREATE INDEX IF NOT EXISTS idx_scrape_jobs_status ON scrape_jobs(status);
             CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+            CREATE INDEX IF NOT EXISTS idx_email_configs_user_id ON email_configs(user_id);
+            CREATE INDEX IF NOT EXISTS idx_email_configs_inbound ON email_configs(inbound_email);
+            CREATE INDEX IF NOT EXISTS idx_email_log_user_id ON email_log(user_id);
         """)
 
         # Step 4: Seed default court configurations
