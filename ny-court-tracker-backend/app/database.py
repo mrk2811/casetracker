@@ -34,6 +34,7 @@ def get_db():
 
 def init_db():
     with get_db() as conn:
+        # Step 1: Create tables (without new columns that might conflict with existing tables)
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +61,13 @@ def init_db():
                 justice TEXT,
                 part TEXT,
                 notes TEXT,
+                priority TEXT DEFAULT 'normal',
+                source TEXT DEFAULT 'manual',
+                last_checked_at TIMESTAMP,
+                last_source TEXT,
+                verified INTEGER DEFAULT 0,
+                search_params TEXT,
+                court_system TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -73,9 +81,58 @@ def init_db():
                 appearance_type TEXT,
                 location TEXT,
                 notes TEXT,
+                source TEXT DEFAULT 'manual',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS case_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                event_date TEXT,
+                description TEXT,
+                source TEXT DEFAULT 'manual',
+                source_raw TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS court_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                state TEXT NOT NULL,
+                court_system TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                base_url TEXT,
+                adapter_class TEXT NOT NULL,
+                enabled INTEGER DEFAULT 1,
+                scrape_config TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS scrape_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                case_id INTEGER NOT NULL,
+                court_system TEXT NOT NULL,
+                status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
+                scheduled_at TIMESTAMP,
+                started_at TIMESTAMP,
+                completed_at TIMESTAMP,
+                result TEXT,
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS email_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                inbound_email TEXT UNIQUE,
+                forwarding_verified INTEGER DEFAULT 0,
+                provider TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS notification_settings (
@@ -101,9 +158,47 @@ def init_db():
                 FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE SET NULL,
                 FOREIGN KEY (appearance_id) REFERENCES appearances(id) ON DELETE SET NULL
             );
+        """)
 
+        # Step 2: Migrate existing tables — add new columns if they don't exist
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(cases)").fetchall()}
+        migrations = [
+            ("priority", "ALTER TABLE cases ADD COLUMN priority TEXT DEFAULT 'normal'"),
+            ("source", "ALTER TABLE cases ADD COLUMN source TEXT DEFAULT 'manual'"),
+            ("last_checked_at", "ALTER TABLE cases ADD COLUMN last_checked_at TIMESTAMP"),
+            ("last_source", "ALTER TABLE cases ADD COLUMN last_source TEXT"),
+            ("verified", "ALTER TABLE cases ADD COLUMN verified INTEGER DEFAULT 0"),
+            ("search_params", "ALTER TABLE cases ADD COLUMN search_params TEXT"),
+            ("court_system", "ALTER TABLE cases ADD COLUMN court_system TEXT"),
+        ]
+        for col_name, alter_sql in migrations:
+            if col_name not in existing_cols:
+                conn.execute(alter_sql)
+
+        app_cols = {row[1] for row in conn.execute("PRAGMA table_info(appearances)").fetchall()}
+        if "source" not in app_cols:
+            conn.execute("ALTER TABLE appearances ADD COLUMN source TEXT DEFAULT 'manual'")
+
+        # Step 3: Create indexes (after migrations so columns exist)
+        conn.executescript("""
             CREATE INDEX IF NOT EXISTS idx_cases_user_id ON cases(user_id);
+            CREATE INDEX IF NOT EXISTS idx_cases_priority ON cases(priority);
+            CREATE INDEX IF NOT EXISTS idx_cases_source ON cases(source);
+            CREATE INDEX IF NOT EXISTS idx_cases_court_system ON cases(court_system);
             CREATE INDEX IF NOT EXISTS idx_appearances_case_id ON appearances(case_id);
             CREATE INDEX IF NOT EXISTS idx_appearances_date ON appearances(appearance_date);
+            CREATE INDEX IF NOT EXISTS idx_case_events_case_id ON case_events(case_id);
+            CREATE INDEX IF NOT EXISTS idx_scrape_jobs_case_id ON scrape_jobs(case_id);
+            CREATE INDEX IF NOT EXISTS idx_scrape_jobs_status ON scrape_jobs(status);
             CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
+        """)
+
+        # Step 4: Seed default court configurations
+        conn.execute("""
+            INSERT OR IGNORE INTO court_configs (state, court_system, display_name, base_url, adapter_class)
+            VALUES ('NY', 'ny_webcivil', 'NY WebCivil (Supreme & Civil)', 'https://iapps.courts.state.ny.us/webcivil', 'NYWebCivilAdapter')
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO court_configs (state, court_system, display_name, base_url, adapter_class)
+            VALUES ('NY', 'ny_webcrimin', 'NY WebCriminal', 'https://iapps.courts.state.ny.us/webcrimin', 'NYWebCriminAdapter')
         """)

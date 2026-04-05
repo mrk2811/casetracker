@@ -24,6 +24,11 @@ const STATUSES = [
   { value: "disposed", label: "Disposed" },
 ];
 
+const PRIORITIES = [
+  { value: "normal", label: "Normal", description: "Updated 2x/day (6am, 12:30pm)" },
+  { value: "high", label: "High Priority", description: "Updated every 2-4 hours" },
+];
+
 const NY_COUNTIES = [
   "Albany", "Allegany", "Bronx", "Broome", "Cattaraugus", "Cayuga", "Chautauqua",
   "Chemung", "Chenango", "Clinton", "Columbia", "Cortland", "Delaware", "Dutchess",
@@ -46,6 +51,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
     index_number: "",
     case_year: "",
     case_status: "active",
+    priority: "normal",
     plaintiff: "",
     defendant: "",
     plaintiff_firm: "",
@@ -59,6 +65,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
   const [showCourtPicker, setShowCourtPicker] = useState(false);
   const [showCountyPicker, setShowCountyPicker] = useState(false);
   const [showStatusPicker, setShowStatusPicker] = useState(false);
+  const [showPriorityPicker, setShowPriorityPicker] = useState(false);
 
   useEffect(() => {
     if (isEditing) {
@@ -73,6 +80,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
             index_number: c.index_number,
             case_year: c.case_year ? String(c.case_year) : "",
             case_status: c.case_status,
+            priority: c.priority || "normal",
             plaintiff: c.plaintiff || "",
             defendant: c.defendant || "",
             plaintiff_firm: c.plaintiff_firm || "",
@@ -103,6 +111,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
         county: form.county,
         index_number: form.index_number,
         case_status: form.case_status,
+        priority: form.priority,
         case_year: form.case_year ? parseInt(form.case_year) : null,
         plaintiff: form.plaintiff || null,
         defendant: form.defendant || null,
@@ -137,6 +146,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
 
   const selectedCourt = COURT_TYPES.find((c) => c.value === form.court_type);
   const selectedStatus = STATUSES.find((s) => s.value === form.case_status);
+  const selectedPriority = PRIORITIES.find((p) => p.value === form.priority);
 
   return (
     <ScrollView style={styles.container} keyboardShouldPersistTaps="handled">
@@ -274,6 +284,51 @@ export default function CaseFormScreen({ route, navigation }: any) {
               >
                 {s.label}
               </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {/* Priority */}
+      <Text style={styles.label}>Priority</Text>
+      <TouchableOpacity
+        style={styles.picker}
+        onPress={() => setShowPriorityPicker(!showPriorityPicker)}
+      >
+        <View style={styles.priorityPickerContent}>
+          {form.priority === "high" && (
+            <Ionicons name="flag" size={14} color="#ef4444" />
+          )}
+          <Text style={styles.pickerText}>{selectedPriority?.label}</Text>
+        </View>
+        <Ionicons name="chevron-down" size={18} color="#6b7280" />
+      </TouchableOpacity>
+      {showPriorityPicker && (
+        <View style={styles.pickerOptions}>
+          {PRIORITIES.map((p) => (
+            <TouchableOpacity
+              key={p.value}
+              style={[
+                styles.pickerOption,
+                form.priority === p.value && styles.pickerOptionSelected,
+              ]}
+              onPress={() => {
+                updateForm("priority", p.value);
+                setShowPriorityPicker(false);
+              }}
+            >
+              <View>
+                <Text
+                  style={[
+                    styles.pickerOptionText,
+                    form.priority === p.value && styles.pickerOptionTextSelected,
+                    p.value === "high" && { color: "#ef4444" },
+                  ]}
+                >
+                  {p.value === "high" ? "\u{1F6A9} " : ""}{p.label}
+                </Text>
+                <Text style={styles.priorityDescription}>{p.description}</Text>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
@@ -463,4 +518,6 @@ const styles = StyleSheet.create({
     borderColor: "#d1d5db",
   },
   cancelText: { color: "#6b7280", fontSize: 16 },
+  priorityPickerContent: { flexDirection: "row", alignItems: "center", gap: 6 },
+  priorityDescription: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
 });

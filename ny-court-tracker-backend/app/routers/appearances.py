@@ -15,6 +15,7 @@ def _row_to_appearance(row) -> AppearanceOut:
         appearance_type=row["appearance_type"],
         location=row["location"],
         notes=row["notes"],
+        source=row["source"] if "source" in row.keys() else "manual",
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

@@ -13,7 +13,36 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { casesApi, appearancesApi, Case, Appearance } from "../services/api";
+import { casesApi, appearancesApi, Case, Appearance, FreshnessInfo } from "../services/api";
+
+const FRESHNESS_COLORS: Record<string, string> = {
+  fresh: "#10b981",
+  stale: "#f59e0b",
+  outdated: "#ef4444",
+  unknown: "#9ca3af",
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  manual: "Manual Entry",
+  webcivil_scraper: "WebCivil Scraper",
+  webcrimin_scraper: "WebCriminal Scraper",
+  etrack_email: "Court Notification (eTrack)",
+  api_provider: "API Provider",
+};
+
+const PRIORITY_LABELS: Record<string, string> = {
+  normal: "Normal",
+  high: "High Priority",
+};
+
+function formatFreshness(freshness: FreshnessInfo | null): string {
+  if (!freshness || freshness.status === "unknown") return "Not checked yet";
+  const hours = freshness.hours_since_check;
+  if (hours === null) return "Not checked yet";
+  if (hours < 1) return "Just now";
+  if (hours < 24) return `${Math.round(hours)}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
 
 const COURT_LABELS: Record<string, string> = {
   supreme: "Supreme Court",
@@ -256,6 +285,67 @@ export default function CaseDetailScreen({ route, navigation }: any) {
         )}
       </View>
 
+      {/* Tracking Info Card */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Tracking Info</Text>
+        <View style={styles.trackingGrid}>
+          <View style={styles.trackingItem}>
+            <Text style={styles.infoLabel}>Priority</Text>
+            <View style={styles.priorityRow}>
+              {caseData.priority === "high" && (
+                <Ionicons name="flag" size={14} color="#ef4444" />
+              )}
+              <Text style={[
+                styles.infoValue,
+                caseData.priority === "high" && { color: "#ef4444", fontWeight: "700" },
+              ]}>
+                {PRIORITY_LABELS[caseData.priority] || caseData.priority}
+              </Text>
+            </View>
+          </View>
+          <View style={styles.trackingItem}>
+            <Text style={styles.infoLabel}>Source</Text>
+            <Text style={styles.infoValue}>
+              {SOURCE_LABELS[caseData.source] || caseData.source}
+            </Text>
+          </View>
+          <View style={styles.trackingItem}>
+            <Text style={styles.infoLabel}>Verified</Text>
+            <View style={styles.priorityRow}>
+              <Ionicons
+                name={caseData.verified ? "checkmark-circle" : "close-circle-outline"}
+                size={16}
+                color={caseData.verified ? "#10b981" : "#9ca3af"}
+              />
+              <Text style={styles.infoValue}>{caseData.verified ? "Yes" : "No"}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Freshness Indicator */}
+        {caseData.freshness && (
+          <>
+            <View style={styles.divider} />
+            <View style={styles.freshnessBar}>
+              <View
+                style={[
+                  styles.freshnessDot,
+                  { backgroundColor: FRESHNESS_COLORS[caseData.freshness.status] || "#9ca3af" },
+                ]}
+              />
+              <Text style={styles.freshnessLabel}>
+                Last checked: {formatFreshness(caseData.freshness)}
+              </Text>
+              {caseData.freshness.last_source && (
+                <Text style={styles.freshnessSource}>
+                  Source: {SOURCE_LABELS[caseData.freshness.last_source] || caseData.freshness.last_source}
+                </Text>
+              )}
+            </View>
+          </>
+        )}
+      </View>
+
       {/* Appearances */}
       <View style={styles.card}>
         <View style={styles.sectionHeader}>
@@ -466,6 +556,22 @@ const styles = StyleSheet.create({
   firmText: { fontSize: 12, color: "#9ca3af", marginTop: 2 },
   divider: { height: 1, backgroundColor: "#f3f4f6", marginVertical: 12 },
   notesText: { fontSize: 14, color: "#374151", marginTop: 4, lineHeight: 20 },
+  trackingGrid: { flexDirection: "row", flexWrap: "wrap", gap: 16, marginTop: 8 },
+  trackingItem: { minWidth: "28%" },
+  priorityRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  freshnessBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  freshnessDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  freshnessLabel: { fontSize: 13, color: "#374151" },
+  freshnessSource: { fontSize: 12, color: "#9ca3af" },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
