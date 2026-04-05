@@ -10,10 +10,11 @@ import {
   Modal,
   TextInput,
   Platform,
+  Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
-import { casesApi, appearancesApi, scraperApi, Case, Appearance, FreshnessInfo } from "../services/api";
+import { casesApi, appearancesApi, scraperApi, notificationsApi, Case, Appearance, FreshnessInfo, CaseNotificationPrefs } from "../services/api";
 
 const FRESHNESS_COLORS: Record<string, string> = {
   fresh: "#10b981",
@@ -77,6 +78,7 @@ export default function CaseDetailScreen({ route, navigation }: any) {
     notes: "",
   });
   const [scraping, setScraping] = useState(false);
+  const [caseNotifPrefs, setCaseNotifPrefs] = useState<CaseNotificationPrefs | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -87,6 +89,14 @@ export default function CaseDetailScreen({ route, navigation }: any) {
       ]);
       setCaseData(caseRes.data);
       setAppearances(appRes.data);
+      // Fetch per-case notification prefs
+      try {
+        const prefsRes = await notificationsApi.getCasePrefs(id);
+        setCaseNotifPrefs(prefsRes.data);
+      } catch {
+        // Default prefs if not set
+        setCaseNotifPrefs(null);
+      }
     } catch (err) {
       console.error("Failed to fetch case", err);
     } finally {
@@ -389,6 +399,58 @@ export default function CaseDetailScreen({ route, navigation }: any) {
             {scraping ? "Checking court system..." : "Check for Updates Now"}
           </Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Per-Case Notification Preferences */}
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>Notification Preferences</Text>
+        <Text style={styles.notifPrefDescription}>
+          Override global settings for this specific case
+        </Text>
+
+        <View style={styles.notifPrefRow}>
+          <View style={styles.notifPrefInfo}>
+            <Ionicons name="phone-portrait-outline" size={16} color="#6b7280" />
+            <Text style={styles.notifPrefLabel}>Push Notifications</Text>
+          </View>
+          <Switch
+            value={caseNotifPrefs?.push_enabled ?? true}
+            onValueChange={async (v) => {
+              setCaseNotifPrefs((prev) => prev ? { ...prev, push_enabled: v } : null);
+              try {
+                const res = await notificationsApi.updateCasePrefs(id, { push_enabled: v });
+                setCaseNotifPrefs(res.data);
+              } catch {
+                Alert.alert("Error", "Failed to update notification preferences");
+              }
+            }}
+            trackColor={{ false: "#d1d5db", true: "#18181b" }}
+            thumbColor="#fff"
+          />
+        </View>
+
+        <View style={styles.notifPrefDivider} />
+
+        <View style={styles.notifPrefRow}>
+          <View style={styles.notifPrefInfo}>
+            <Ionicons name="mail-outline" size={16} color="#6b7280" />
+            <Text style={styles.notifPrefLabel}>Email Notifications</Text>
+          </View>
+          <Switch
+            value={caseNotifPrefs?.email_enabled ?? true}
+            onValueChange={async (v) => {
+              setCaseNotifPrefs((prev) => prev ? { ...prev, email_enabled: v } : null);
+              try {
+                const res = await notificationsApi.updateCasePrefs(id, { email_enabled: v });
+                setCaseNotifPrefs(res.data);
+              } catch {
+                Alert.alert("Error", "Failed to update notification preferences");
+              }
+            }}
+            trackColor={{ false: "#d1d5db", true: "#18181b" }}
+            thumbColor="#fff"
+          />
+        </View>
       </View>
 
       {/* Appearances */}
@@ -716,4 +778,14 @@ const styles = StyleSheet.create({
     borderColor: "#d1d5db",
   },
   cancelButtonText: { color: "#6b7280", fontSize: 16 },
+  notifPrefDescription: { fontSize: 13, color: "#9ca3af", marginTop: 4, marginBottom: 12 },
+  notifPrefRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 4,
+  },
+  notifPrefInfo: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
+  notifPrefLabel: { fontSize: 15, fontWeight: "500", color: "#374151" },
+  notifPrefDivider: { height: 1, backgroundColor: "#f3f4f6", marginVertical: 8 },
 });

@@ -313,7 +313,7 @@ def _create_notification(user_id: int, case_id: int, event: ParsedEmailEvent) ->
     }
 
     title = title_map.get(event.event_type, "Case Update")
-    message = event.description or f"Update received via court notification email"
+    message = event.description or "Update received via court notification email"
 
     if event.index_number:
         message = f"Case #{event.index_number}: {message}"

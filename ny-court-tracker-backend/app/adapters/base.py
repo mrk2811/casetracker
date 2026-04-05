@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
-from datetime import date, datetime
+from datetime import date
 
 
 class CaseSource(str, Enum):

@@ -228,12 +228,24 @@ def setup_scheduler(db_path: str) -> AsyncIOScheduler:
     Schedule:
     - Normal priority: 6:00 AM ET and 12:30 PM ET (with randomized offset applied in job)
     - High priority: Every 3 hours starting at 6:00 AM ET (with randomized offset)
+    - Notification checks: appearance reminders, auto-priority escalation, stale cases
+    - Digest emails: daily at 8am ET, weekly on Monday at 8am ET
     """
+    from app.notifications.scheduler import (
+        check_appearance_reminders,
+        check_auto_priority_escalation,
+        check_stale_cases,
+        generate_daily_digest,
+        generate_weekly_digest,
+    )
+
     scheduler = get_scheduler()
 
     if scheduler.running:
         logger.info("Scheduler already running, skipping setup")
         return scheduler
+
+    # ─── Scraper Jobs ───
 
     # Normal priority: 2x/day at 6am and 12:30pm ET
     scheduler.add_job(
@@ -263,7 +275,54 @@ def setup_scheduler(db_path: str) -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    logger.info("Scraper scheduler configured with cron jobs")
+    # ─── Notification Jobs ───
+
+    # Appearance reminders: daily at 7am ET
+    scheduler.add_job(
+        check_appearance_reminders,
+        CronTrigger(hour=7, minute=0, timezone="US/Eastern"),
+        id="notification_appearance_reminders",
+        name="Check appearance reminders",
+        replace_existing=True,
+    )
+
+    # Auto-priority escalation: daily at 7:15am ET
+    scheduler.add_job(
+        check_auto_priority_escalation,
+        CronTrigger(hour=7, minute=15, timezone="US/Eastern"),
+        id="notification_auto_priority",
+        name="Auto-priority escalation check",
+        replace_existing=True,
+    )
+
+    # Stale case check: every 6 hours
+    scheduler.add_job(
+        check_stale_cases,
+        CronTrigger(hour="1,7,13,19", minute=30, timezone="US/Eastern"),
+        id="notification_stale_cases",
+        name="Stale case check (every 6 hours)",
+        replace_existing=True,
+    )
+
+    # Daily digest: at 8am ET
+    scheduler.add_job(
+        generate_daily_digest,
+        CronTrigger(hour=8, minute=0, timezone="US/Eastern"),
+        id="notification_daily_digest",
+        name="Daily digest email",
+        replace_existing=True,
+    )
+
+    # Weekly digest: Monday at 8am ET
+    scheduler.add_job(
+        generate_weekly_digest,
+        CronTrigger(day_of_week="mon", hour=8, minute=0, timezone="US/Eastern"),
+        id="notification_weekly_digest",
+        name="Weekly digest email",
+        replace_existing=True,
+    )
+
+    logger.info("Scraper + notification scheduler configured with cron jobs")
     return scheduler
 
 

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from app.database import get_db
-from app.email.parser import parse_email, parse_multi_case_email, is_court_notification
+from app.email.parser import parse_multi_case_email, is_court_notification
 from app.email.dedup import process_email_events
 
 logger = logging.getLogger(__name__)
