@@ -357,3 +357,66 @@ class EmailLogOut(BaseModel):
     subject: Optional[str] = None
     events_extracted: int = 0
     received_at: str
+
+
+# ─── Case Discovery ───
+class DiscoverySettingsUpdate(BaseModel):
+    """Update discovery settings."""
+    enabled: Optional[bool] = None
+    attorney_name: Optional[str] = None
+    attorney_reg_number: Optional[str] = None
+    search_courts: Optional[str] = None  # comma-separated court system IDs
+    search_county: Optional[str] = None
+
+
+class DiscoverySettingsOut(BaseModel):
+    """Discovery settings response."""
+    id: int
+    user_id: int
+    enabled: bool
+    attorney_name: Optional[str] = None
+    attorney_reg_number: Optional[str] = None
+    search_courts: str = "ny_webcivil,ny_webcrimin"
+    search_county: Optional[str] = None
+    last_run_at: Optional[str] = None
+    next_run_at: Optional[str] = None
+
+
+class DiscoveredCaseOut(BaseModel):
+    """A discovered case that the user can accept or dismiss."""
+    id: int
+    user_id: int
+    index_number: str
+    court_type: str
+    county: Optional[str] = None
+    court_system: Optional[str] = None
+    plaintiff: Optional[str] = None
+    defendant: Optional[str] = None
+    case_status: Optional[str] = None
+    last_action: Optional[str] = None
+    last_action_date: Optional[str] = None
+    source_adapter: Optional[str] = None
+    status: str = "pending"
+    notification_id: Optional[int] = None
+    discovered_at: str
+    resolved_at: Optional[str] = None
+
+
+class DiscoveryAcceptResponse(BaseModel):
+    """Response from accepting a discovered case."""
+    status: str
+    case_id: Optional[int] = None
+    message: str
+
+
+class DiscoveryDismissResponse(BaseModel):
+    """Response from dismissing a discovered case."""
+    status: str
+    message: str
+
+
+class DiscoveryRunResponse(BaseModel):
+    """Response from manually triggering discovery."""
+    users_checked: int = 0
+    total_discoveries: int = 0
+    errors: int = 0

@@ -350,6 +350,62 @@ class NYWebCriminAdapter(CourtAdapter):
         )
         return appearances
 
+    async def search_by_attorney(
+        self, attorney_name: str, attorney_reg_number: Optional[str] = None, county: Optional[str] = None
+    ) -> list[CourtRecord]:
+        """
+        Search NY WebCriminal for cases associated with an attorney.
+
+        WebCriminal supports searching by defendant name. For attorney-based
+        detection, we search by the attorney's name as defendant (defense counsel
+        cases) since criminal cases list defendants, not attorneys directly.
+        """
+        engine = self._get_engine()
+
+        search_url = f"{BASE_URL}/CRSearch"
+
+        form_data: dict[str, str] = {
+            "txtDefendant": attorney_name,
+        }
+        if county:
+            form_data["txtCounty"] = county
+
+        logger.info(
+            "Searching NYWebCriminal by attorney name: %s (county: %s)",
+            attorney_name, county,
+        )
+
+        result = await engine.post(search_url, data=form_data)
+
+        if not result.success:
+            if result.captcha_detected:
+                logger.warning("CAPTCHA blocked NYWebCriminal attorney search")
+            return []
+
+        if not result.soup:
+            return []
+
+        raw_results = _parse_search_results(result.soup)
+
+        records = []
+        for raw in raw_results:
+            record = CourtRecord(
+                index_number=raw.get("case_number", ""),
+                court_type="criminal",
+                county=county or "",
+                plaintiff="People of the State of New York",
+                defendant=raw.get("defendant"),
+                source=CaseSource.WEBCRIMIN_SCRAPER,
+                raw_data=raw,
+            )
+            records.append(record)
+
+        logger.info(
+            "NYWebCriminal attorney search for '%s' found %d cases",
+            attorney_name, len(records),
+        )
+        return records
+
     async def health_check(self) -> bool:
         """Check if NY WebCriminal is accessible."""
         engine = self._get_engine()

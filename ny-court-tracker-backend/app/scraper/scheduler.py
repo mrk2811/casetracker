@@ -238,6 +238,7 @@ def setup_scheduler(db_path: str) -> AsyncIOScheduler:
         generate_daily_digest,
         generate_weekly_digest,
     )
+    from app.discovery.engine import run_weekly_discovery
 
     scheduler = get_scheduler()
 
@@ -322,7 +323,18 @@ def setup_scheduler(db_path: str) -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    logger.info("Scraper + notification scheduler configured with cron jobs")
+    # ─── Weekly Case Discovery ───
+
+    # Weekly case detection: Monday at 7am ET
+    scheduler.add_job(
+        run_weekly_discovery,
+        CronTrigger(day_of_week="mon", hour=7, minute=0, timezone="US/Eastern"),
+        id="weekly_case_discovery",
+        name="Weekly case discovery scan",
+        replace_existing=True,
+    )
+
+    logger.info("Scraper + notification + discovery scheduler configured with cron jobs")
     return scheduler
 
 

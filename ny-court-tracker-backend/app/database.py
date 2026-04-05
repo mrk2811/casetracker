@@ -196,6 +196,41 @@ def init_db():
                 FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS discovered_cases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                index_number TEXT NOT NULL,
+                court_type TEXT NOT NULL,
+                county TEXT,
+                court_system TEXT,
+                plaintiff TEXT,
+                defendant TEXT,
+                case_status TEXT,
+                last_action TEXT,
+                last_action_date TEXT,
+                source_adapter TEXT,
+                status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'dismissed')),
+                notification_id INTEGER,
+                discovered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                resolved_at TIMESTAMP,
+                UNIQUE(user_id, index_number, court_system),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS discovery_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER UNIQUE NOT NULL,
+                enabled INTEGER DEFAULT 1,
+                attorney_name TEXT,
+                attorney_reg_number TEXT,
+                search_courts TEXT DEFAULT 'ny_webcivil,ny_webcrimin',
+                search_county TEXT,
+                last_run_at TIMESTAMP,
+                next_run_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
         """)
 
         # Step 2: Migrate existing tables — add new columns if they don't exist
@@ -252,6 +287,9 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_email_configs_user_id ON email_configs(user_id);
             CREATE INDEX IF NOT EXISTS idx_email_configs_inbound ON email_configs(inbound_email);
             CREATE INDEX IF NOT EXISTS idx_email_log_user_id ON email_log(user_id);
+            CREATE INDEX IF NOT EXISTS idx_discovered_cases_user_id ON discovered_cases(user_id);
+            CREATE INDEX IF NOT EXISTS idx_discovered_cases_status ON discovered_cases(status);
+            CREATE INDEX IF NOT EXISTS idx_discovery_settings_user_id ON discovery_settings(user_id);
         """)
 
         # Step 4: Seed default court configurations

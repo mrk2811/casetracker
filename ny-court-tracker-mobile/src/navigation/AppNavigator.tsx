@@ -5,7 +5,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
-import { notificationsApi } from "../services/api";
+import { notificationsApi, discoveryApi } from "../services/api";
 import { registerForPushNotifications, setupNotificationResponseListener } from "../services/pushNotifications";
 
 import LoginScreen from "../screens/LoginScreen";
@@ -16,6 +16,7 @@ import CaseDetailScreen from "../screens/CaseDetailScreen";
 import CaseFormScreen from "../screens/CaseFormScreen";
 import CalendarScreen from "../screens/CalendarScreen";
 import NotificationsScreen from "../screens/NotificationsScreen";
+import DiscoveriesScreen from "../screens/DiscoveriesScreen";
 import SettingsScreen from "../screens/SettingsScreen";
 import EmailSetupScreen from "../screens/EmailSetupScreen";
 
@@ -45,6 +46,7 @@ function SettingsStackNavigator() {
 
 function MainTabs() {
   const [unreadCount, setUnreadCount] = useState(0);
+  const [pendingDiscoveries, setPendingDiscoveries] = useState(0);
   const navigationRef = useRef<any>(null);
 
   // Fetch unread count periodically
@@ -57,15 +59,28 @@ function MainTabs() {
     }
   }, []);
 
+  const fetchPendingDiscoveries = useCallback(async () => {
+    try {
+      const res = await discoveryApi.getPendingCount();
+      setPendingDiscoveries(res.data.count);
+    } catch {
+      // Silently fail
+    }
+  }, []);
+
   useEffect(() => {
     // Register for push notifications on mount
     registerForPushNotifications();
 
-    // Fetch initial unread count
+    // Fetch initial counts
     fetchUnreadCount();
+    fetchPendingDiscoveries();
 
     // Poll every 60 seconds
-    const interval = setInterval(fetchUnreadCount, 60000);
+    const interval = setInterval(() => {
+      fetchUnreadCount();
+      fetchPendingDiscoveries();
+    }, 60000);
 
     // Handle notification taps - navigate to relevant case
     const cleanup = setupNotificationResponseListener((data) => {
@@ -83,7 +98,7 @@ function MainTabs() {
       clearInterval(interval);
       cleanup();
     };
-  }, [fetchUnreadCount]);
+  }, [fetchUnreadCount, fetchPendingDiscoveries]);
 
   return (
     <Tab.Navigator
@@ -111,8 +126,8 @@ function MainTabs() {
             case "CasesTab":
               iconName = focused ? "folder" : "folder-outline";
               break;
-            case "Calendar":
-              iconName = focused ? "calendar" : "calendar-outline";
+            case "Discoveries":
+              iconName = focused ? "search" : "search-outline";
               break;
             case "Notifications":
               iconName = focused ? "notifications" : "notifications-outline";
@@ -131,7 +146,19 @@ function MainTabs() {
         component={CasesStackNavigator}
         options={{ tabBarLabel: "Cases" }}
       />
-      <Tab.Screen name="Calendar" component={CalendarScreen} />
+      <Tab.Screen
+        name="Discoveries"
+        component={DiscoveriesScreen}
+        listeners={{
+          tabPress: () => {
+            fetchPendingDiscoveries();
+          },
+        }}
+        options={{
+          tabBarBadge: pendingDiscoveries > 0 ? pendingDiscoveries : undefined,
+          tabBarBadgeStyle: discoverBadgeStyles.badge,
+        }}
+      />
       <Tab.Screen
         name="Notifications"
         component={NotificationsScreen}
@@ -154,6 +181,17 @@ function MainTabs() {
 const badgeStyles = StyleSheet.create({
   badge: {
     backgroundColor: "#ef4444",
+    fontSize: 10,
+    fontWeight: "600",
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+  },
+});
+
+const discoverBadgeStyles = StyleSheet.create({
+  badge: {
+    backgroundColor: "#f59e0b",
     fontSize: 10,
     fontWeight: "600",
     minWidth: 18,

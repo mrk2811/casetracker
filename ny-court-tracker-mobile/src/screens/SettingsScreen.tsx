@@ -12,7 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useAuth } from "../context/AuthContext";
-import { notificationsApi, NotificationSettings, emailApi } from "../services/api";
+import { notificationsApi, NotificationSettings, emailApi, discoveryApi, DiscoverySettings } from "../services/api";
 
 const REMINDER_OPTIONS = [
   { value: 1, label: "1 day before" },
@@ -36,6 +36,8 @@ export default function SettingsScreen() {
   const [showReminderPicker, setShowReminderPicker] = useState(false);
   const [showDigestPicker, setShowDigestPicker] = useState(false);
   const [emailStatus, setEmailStatus] = useState<{ configured: boolean; verified: boolean } | null>(null);
+  const [discoverySettings, setDiscoverySettings] = useState<DiscoverySettings | null>(null);
+  const [savingDiscovery, setSavingDiscovery] = useState(false);
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -58,12 +60,37 @@ export default function SettingsScreen() {
     }
   };
 
+  const fetchDiscoverySettings = async () => {
+    try {
+      const res = await discoveryApi.getSettings();
+      setDiscoverySettings(res.data);
+    } catch {
+      // Not configured yet
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       fetchSettings();
       fetchEmailStatus();
+      fetchDiscoverySettings();
     }, [])
   );
+
+  const saveDiscoverySettings = async (updated: Partial<DiscoverySettings>) => {
+    if (!discoverySettings) return;
+    const newSettings = { ...discoverySettings, ...updated };
+    setDiscoverySettings(newSettings);
+    setSavingDiscovery(true);
+    try {
+      await discoveryApi.updateSettings(updated);
+    } catch {
+      Alert.alert("Error", "Failed to save discovery settings");
+      fetchDiscoverySettings();
+    } finally {
+      setSavingDiscovery(false);
+    }
+  };
 
   const saveSettings = async (updated: Partial<NotificationSettings>) => {
     if (!settings) return;
@@ -325,6 +352,77 @@ export default function SettingsScreen() {
             {emailStatus?.configured ? 'Manage Email Integration' : 'Set Up Email Integration'}
           </Text>
         </TouchableOpacity>
+      </View>
+
+      {/* Case Discovery */}
+      <View style={styles.card}>
+        <View style={styles.cardHeader}>
+          <Ionicons name="search-outline" size={22} color="#18181b" />
+          <Text style={styles.cardTitle}>Weekly Case Discovery</Text>
+          {savingDiscovery && <ActivityIndicator size="small" color="#6b7280" style={{ marginLeft: 8 }} />}
+        </View>
+
+        <Text style={styles.settingDescription}>
+          Automatically scan court systems weekly to find new cases under your name.
+        </Text>
+
+        <View style={[styles.settingRow, { marginTop: 12 }]}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>Enable Discovery</Text>
+            <Text style={styles.settingDescription}>
+              Scan every Monday at 7am ET
+            </Text>
+          </View>
+          <Switch
+            value={discoverySettings?.enabled ?? true}
+            onValueChange={(v) => saveDiscoverySettings({ enabled: v })}
+            trackColor={{ false: "#d1d5db", true: "#18181b" }}
+            thumbColor="#fff"
+          />
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.infoItem}>
+          <Text style={styles.infoLabel}>Attorney Name</Text>
+          <Text style={styles.infoValue}>
+            {discoverySettings?.attorney_name || "Not set"}
+          </Text>
+        </View>
+
+        {discoverySettings?.attorney_reg_number && (
+          <View style={[styles.infoItem, { marginTop: 8 }]}>
+            <Text style={styles.infoLabel}>Registration #</Text>
+            <Text style={styles.infoValue}>
+              {discoverySettings.attorney_reg_number}
+            </Text>
+          </View>
+        )}
+
+        <View style={[styles.infoItem, { marginTop: 8 }]}>
+          <Text style={styles.infoLabel}>Courts Searched</Text>
+          <Text style={styles.infoValue}>
+            {(discoverySettings?.search_courts || "ny_webcivil,ny_webcrimin")
+              .split(",")
+              .map((c: string) => c.trim().replace("ny_", "NY ").replace("webcivil", "WebCivil").replace("webcrimin", "WebCriminal"))
+              .join(", ")}
+          </Text>
+        </View>
+
+        {discoverySettings?.last_run_at && (
+          <View style={[styles.infoItem, { marginTop: 8 }]}>
+            <Text style={styles.infoLabel}>Last Scan</Text>
+            <Text style={styles.infoValue}>
+              {new Date(discoverySettings.last_run_at).toLocaleDateString("en-US", {
+                month: "short",
+                day: "numeric",
+                year: "numeric",
+                hour: "numeric",
+                minute: "2-digit",
+              })}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Sign Out */}
