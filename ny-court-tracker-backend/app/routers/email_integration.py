@@ -245,18 +245,32 @@ async def sendgrid_webhook(request: Request):
 
 @router.post("/webhook/test")
 async def test_webhook(
-    sender: str = Form("noreply@nycourts.gov"),
-    subject: str = Form("Court Notification - Case Update"),
-    text: str = Form(""),
-    to: Optional[str] = Form(None),
+    request: Request,
+    sender: Optional[str] = None,
+    subject: Optional[str] = None,
+    text: Optional[str] = None,
+    to: Optional[str] = None,
     user_id: int = Depends(get_current_user_id),
 ):
     """
     Test endpoint to simulate receiving a court notification email.
     
+    Accepts both query params and JSON body for flexibility.
     Useful for testing the email parsing pipeline without
     actually sending an email through SendGrid.
     """
+    # Try to get JSON body if present
+    body_data = {}
+    try:
+        body_data = await request.json()
+    except Exception:
+        pass
+
+    email_sender = sender or body_data.get("sender", "noreply@nycourts.gov")
+    email_subject = subject or body_data.get("subject", "Court Notification - Case Update")
+    email_text = text or body_data.get("text", "")
+    email_to = to or body_data.get("to")
+
     # Get user's inbound email
     with get_db() as conn:
         config = conn.execute(
@@ -270,13 +284,13 @@ async def test_webhook(
             detail="Email integration not set up. Call POST /api/email/setup first.",
         )
 
-    recipient = to or config["inbound_email"]
+    recipient = email_to or config["inbound_email"]
 
     form_data = {
         "to": recipient,
-        "from": sender,
-        "subject": subject,
-        "text": text,
+        "from": email_sender,
+        "subject": email_subject,
+        "text": email_text,
         "html": "",
     }
 
