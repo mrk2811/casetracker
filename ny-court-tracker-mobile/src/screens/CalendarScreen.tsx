@@ -43,6 +43,7 @@ export default function CalendarScreen({ navigation }: any) {
   const [month, setMonth] = useState(today.getMonth());
   const [appearances, setAppearances] = useState<DashboardAppearance[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -63,6 +64,7 @@ export default function CalendarScreen({ navigation }: any) {
   );
 
   const prevMonth = () => {
+    setSelectedDay(null);
     if (month === 0) {
       setMonth(11);
       setYear(year - 1);
@@ -72,6 +74,7 @@ export default function CalendarScreen({ navigation }: any) {
   };
 
   const nextMonth = () => {
+    setSelectedDay(null);
     if (month === 11) {
       setMonth(0);
       setYear(year + 1);
@@ -145,18 +148,24 @@ export default function CalendarScreen({ navigation }: any) {
                   day === todayDate && month === todayMonth && year === todayYear;
                 const dayApps = byDay[day] || [];
 
+                const isSelected = selectedDay === day;
+
                 return (
-                  <View
+                  <TouchableOpacity
                     key={day}
                     style={[
                       styles.calendarCell,
-                      isToday && styles.todayCell,
+                      isToday && !isSelected && styles.todayCell,
+                      isSelected && styles.selectedCell,
                     ]}
+                    onPress={() => setSelectedDay(selectedDay === day ? null : day)}
+                    activeOpacity={0.6}
                   >
                     <Text
                       style={[
                         styles.dayNumber,
-                        isToday && styles.todayNumber,
+                        isToday && !isSelected && styles.todayNumber,
+                        isSelected && styles.selectedNumber,
                       ]}
                     >
                       {day}
@@ -169,13 +178,13 @@ export default function CalendarScreen({ navigation }: any) {
                             styles.dot,
                             {
                               backgroundColor:
-                                COURT_COLORS[app.court_type] || "#6b7280",
+                                isSelected ? "#fff" : (COURT_COLORS[app.court_type] || "#6b7280"),
                             },
                           ]}
                         />
                       ))}
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -199,16 +208,27 @@ export default function CalendarScreen({ navigation }: any) {
           {/* Appearances List */}
           <View style={styles.listSection}>
             <Text style={styles.listTitle}>
-              Appearances This Month ({appearances.length})
+              {selectedDay
+                ? `${MONTHS[month]} ${selectedDay} (${(byDay[selectedDay] || []).length} appearance${(byDay[selectedDay] || []).length !== 1 ? "s" : ""})`
+                : `Appearances This Month (${appearances.length})`}
             </Text>
-            {appearances.length === 0 ? (
+            {selectedDay && (
+              <TouchableOpacity
+                style={styles.clearFilterButton}
+                onPress={() => setSelectedDay(null)}
+              >
+                <Ionicons name="close-circle" size={16} color="#6b7280" />
+                <Text style={styles.clearFilterText}>Show all</Text>
+              </TouchableOpacity>
+            )}
+            {(selectedDay ? (byDay[selectedDay] || []) : appearances).length === 0 ? (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyText}>
-                  No appearances this month
+                  {selectedDay ? "No appearances on this date" : "No appearances this month"}
                 </Text>
               </View>
             ) : (
-              appearances.map((app) => (
+              (selectedDay ? (byDay[selectedDay] || []) : appearances).map((app) => (
                 <TouchableOpacity
                   key={app.appearance_id}
                   style={styles.appCard}
@@ -322,8 +342,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#18181b",
     borderRadius: 8,
   },
+  selectedCell: {
+    backgroundColor: "#3b82f6",
+    borderRadius: 8,
+  },
   dayNumber: { fontSize: 14, color: "#374151", fontWeight: "500" },
   todayNumber: { color: "#fff", fontWeight: "700" },
+  selectedNumber: { color: "#fff", fontWeight: "700" },
   dots: { flexDirection: "row", gap: 2, marginTop: 2 },
   dot: { width: 5, height: 5, borderRadius: 3 },
   legend: {
@@ -339,7 +364,14 @@ const styles = StyleSheet.create({
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { fontSize: 12, color: "#6b7280" },
   listSection: { paddingHorizontal: 20, marginTop: 20 },
-  listTitle: { fontSize: 16, fontWeight: "600", color: "#18181b", marginBottom: 12 },
+  listTitle: { fontSize: 16, fontWeight: "600", color: "#18181b", marginBottom: 8 },
+  clearFilterButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 12,
+  },
+  clearFilterText: { fontSize: 13, color: "#6b7280" },
   emptyState: { alignItems: "center", paddingVertical: 24 },
   emptyText: { fontSize: 14, color: "#9ca3af" },
   appCard: {
