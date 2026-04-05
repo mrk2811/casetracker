@@ -423,6 +423,14 @@ export default function SettingsScreen() {
             </Text>
           </View>
         )}
+
+        <TouchableOpacity
+          style={styles.discoveryButton}
+          onPress={() => navigation.navigate('Discoveries')}
+        >
+          <Ionicons name="search-outline" size={18} color="#fff" />
+          <Text style={styles.discoveryButtonText}>View Discovered Cases</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Sign Out */}
@@ -537,6 +545,21 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   emailSetupButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  discoveryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#18181b",
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 12,
+  },
+  discoveryButtonText: {
     color: "#fff",
     fontSize: 15,
     fontWeight: "600",

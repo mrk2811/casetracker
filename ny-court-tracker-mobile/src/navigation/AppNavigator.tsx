@@ -40,6 +40,7 @@ function SettingsStackNavigator() {
     <SettingsStack.Navigator screenOptions={{ headerShown: false }}>
       <SettingsStack.Screen name="SettingsMain" component={SettingsScreen} />
       <SettingsStack.Screen name="EmailSetup" component={EmailSetupScreen} />
+      <SettingsStack.Screen name="Discoveries" component={DiscoveriesScreen} />
     </SettingsStack.Navigator>
   );
 }
@@ -126,8 +127,8 @@ function MainTabs() {
             case "CasesTab":
               iconName = focused ? "folder" : "folder-outline";
               break;
-            case "Discoveries":
-              iconName = focused ? "search" : "search-outline";
+            case "Calendar":
+              iconName = focused ? "calendar" : "calendar-outline";
               break;
             case "Notifications":
               iconName = focused ? "notifications" : "notifications-outline";
@@ -146,19 +147,7 @@ function MainTabs() {
         component={CasesStackNavigator}
         options={{ tabBarLabel: "Cases" }}
       />
-      <Tab.Screen
-        name="Discoveries"
-        component={DiscoveriesScreen}
-        listeners={{
-          tabPress: () => {
-            fetchPendingDiscoveries();
-          },
-        }}
-        options={{
-          tabBarBadge: pendingDiscoveries > 0 ? pendingDiscoveries : undefined,
-          tabBarBadgeStyle: discoverBadgeStyles.badge,
-        }}
-      />
+      <Tab.Screen name="Calendar" component={CalendarScreen} />
       <Tab.Screen
         name="Notifications"
         component={NotificationsScreen}
