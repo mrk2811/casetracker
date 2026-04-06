@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Switch,
   ActivityIndicator,
   Alert,
@@ -454,19 +455,31 @@ export default function SettingsScreen() {
           <Text style={styles.logoutConfirmTitle}>Sign Out</Text>
           <Text style={styles.logoutConfirmMessage}>Are you sure you want to sign out?</Text>
           <View style={styles.logoutConfirmButtons}>
-            <TouchableOpacity style={styles.logoutCancelBtn} onPress={cancelLogout}>
+            <Pressable
+              style={styles.logoutCancelBtn}
+              onPress={cancelLogout}
+              {...(Platform.OS === 'web' ? { onClick: cancelLogout } as any : {})}
+            >
               <Text style={styles.logoutCancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.logoutConfirmBtn} onPress={confirmLogout}>
+            </Pressable>
+            <Pressable
+              style={styles.logoutConfirmBtn}
+              onPress={confirmLogout}
+              {...(Platform.OS === 'web' ? { onClick: confirmLogout } as any : {})}
+            >
               <Text style={styles.logoutConfirmBtnText}>Sign Out</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </View>
       ) : (
-        <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
+        <Pressable
+          style={styles.signOutButton}
+          onPress={handleLogout}
+          {...(Platform.OS === 'web' ? { onClick: handleLogout } as any : {})}
+        >
           <Ionicons name="log-out-outline" size={20} color="#ef4444" />
           <Text style={styles.signOutText}>Sign Out</Text>
-        </TouchableOpacity>
+        </Pressable>
       )}
 
       <View style={{ height: 40 }} />
