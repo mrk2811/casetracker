@@ -340,6 +340,8 @@ class EmailSetupGuide(BaseModel):
     gmail_instructions: str
     outlook_instructions: str
     privacy_note: str
+    domain_configured: bool = False
+    admin_setup_note: str = ""
 
 
 class EmailWebhookResponse(BaseModel):

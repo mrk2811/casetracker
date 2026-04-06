@@ -322,6 +322,8 @@ export interface EmailSetupGuide {
   gmail_instructions: string;
   outlook_instructions: string;
   privacy_note: string;
+  domain_configured: boolean;
+  admin_setup_note: string;
 }
 
 export interface EmailLogEntry {

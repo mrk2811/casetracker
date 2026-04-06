@@ -247,6 +247,21 @@ export default function EmailSetupScreen({ navigation }: { navigation: any }) {
         )}
       </View>
 
+      {/* Domain Not Configured Warning */}
+      {guide && !guide.domain_configured && (
+        <View style={styles.warningCard}>
+          <Ionicons name="warning-outline" size={20} color="#b45309" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.warningTitle}>Email Domain Not Configured</Text>
+            <Text style={styles.warningText}>
+              An administrator must configure the inbound email domain before
+              email integration can be used. See the admin setup guide below
+              for instructions.
+            </Text>
+          </View>
+        </View>
+      )}
+
       {/* Privacy Notice */}
       <View style={styles.privacyCard}>
         <Ionicons name="shield-checkmark-outline" size={20} color="#16a34a" />
@@ -283,6 +298,17 @@ export default function EmailSetupScreen({ navigation }: { navigation: any }) {
           ))}
         </View>
       )}
+
+      {/* Admin Setup Note */}
+      {guide?.admin_setup_note ? (
+        <View style={styles.adminCard}>
+          <View style={styles.cardHeader}>
+            <Ionicons name="settings-outline" size={20} color="#6b7280" />
+            <Text style={styles.cardTitle}>Admin Configuration</Text>
+          </View>
+          <Text style={styles.adminNoteText}>{guide.admin_setup_note}</Text>
+        </View>
+      ) : null}
 
       {/* Setup Steps */}
       {config && activeTab === "setup" && guide && (
@@ -622,6 +648,35 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   disconnectText: { fontSize: 14, fontWeight: "500", color: "#ef4444" },
+  warningCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    backgroundColor: "#fffbeb",
+    borderRadius: 10,
+    padding: 14,
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#fde68a",
+  },
+  warningTitle: { fontSize: 14, fontWeight: "600", color: "#92400e", marginBottom: 4 },
+  warningText: { fontSize: 13, color: "#92400e", lineHeight: 18 },
+  adminCard: {
+    backgroundColor: "#f9fafb",
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+  },
+  adminNoteText: {
+    fontSize: 13,
+    color: "#4b5563",
+    lineHeight: 20,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
   howItWorksItem: {
     flexDirection: "row",
     gap: 12,

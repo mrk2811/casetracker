@@ -11,6 +11,7 @@ and deduplication engine.
 
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -20,17 +21,42 @@ from app.email.dedup import process_email_events
 
 logger = logging.getLogger(__name__)
 
+# Configurable inbound email domain via environment variable.
+# Must be set to a real domain with MX records pointing to your
+# inbound email service (e.g. SendGrid Inbound Parse, Postmark, Mailgun).
+INBOUND_EMAIL_DOMAIN = os.environ.get("INBOUND_EMAIL_DOMAIN", "")
 
-def generate_inbound_email(user_id: int, domain: str = "courttracker.app") -> str:
+
+def get_inbound_domain() -> str:
+    """Return the configured inbound email domain, or empty string if not set."""
+    return INBOUND_EMAIL_DOMAIN
+
+
+def is_domain_configured() -> bool:
+    """Check whether an inbound email domain has been configured."""
+    return bool(INBOUND_EMAIL_DOMAIN)
+
+
+def generate_inbound_email(user_id: int, domain: Optional[str] = None) -> str:
     """
     Generate a unique inbound email address for a user.
     
-    Format: user-{hash}@{domain}
+    Format: case-{hash}@{domain}
     The hash is deterministic so the same user always gets the same address.
+    
+    Uses INBOUND_EMAIL_DOMAIN env var by default. Raises ValueError if no
+    domain is configured.
     """
+    resolved_domain = domain or INBOUND_EMAIL_DOMAIN
+    if not resolved_domain:
+        raise ValueError(
+            "No inbound email domain configured. "
+            "Set the INBOUND_EMAIL_DOMAIN environment variable to a domain "
+            "with MX records pointing to your inbound email service."
+        )
     hash_input = f"courttracker-user-{user_id}-salt-v1"
     user_hash = hashlib.sha256(hash_input.encode()).hexdigest()[:12]
-    return f"case-{user_hash}@{domain}"
+    return f"case-{user_hash}@{resolved_domain}"
 
 
 def get_user_id_from_inbound_email(inbound_email: str) -> Optional[int]:
@@ -47,7 +73,7 @@ def get_user_id_from_inbound_email(inbound_email: str) -> Optional[int]:
         return row["user_id"] if row else None
 
 
-def setup_user_email(user_id: int, domain: str = "courttracker.app") -> dict:
+def setup_user_email(user_id: int, domain: Optional[str] = None) -> dict:
     """
     Set up email integration for a user.
     

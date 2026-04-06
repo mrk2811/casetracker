@@ -15,6 +15,8 @@ from app.email.webhook import (
     setup_user_email,
     verify_forwarding,
     process_sendgrid_webhook,
+    is_domain_configured,
+    get_inbound_domain,
 )
 from app.schemas import (
     EmailSetupResponse,
@@ -38,6 +40,17 @@ async def setup_email(user_id: int = Depends(get_current_user_id)):
     Creates a unique inbound email address for the user
     and returns setup instructions for eTrack forwarding.
     """
+    if not is_domain_configured():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Email integration is not available yet. "
+                "An administrator must set the INBOUND_EMAIL_DOMAIN "
+                "environment variable to a domain with MX records "
+                "pointing to an inbound email service (e.g. SendGrid "
+                "Inbound Parse)."
+            ),
+        )
     result = setup_user_email(user_id)
     return EmailSetupResponse(**result)
 
@@ -109,6 +122,9 @@ async def get_setup_guide(user_id: int = Depends(get_current_user_id)):
 
     inbound_email = config["inbound_email"] if config else None
 
+    domain_configured = is_domain_configured()
+    domain = get_inbound_domain()
+
     steps = [
         {
             "step": 1,
@@ -133,6 +149,9 @@ async def get_setup_guide(user_id: int = Depends(get_current_user_id)):
             ) if inbound_email else (
                 "First, tap 'Set Up Email' to get your unique forwarding address, "
                 "then set up forwarding in your email client."
+            ) if domain_configured else (
+                "Email integration is not available yet. An administrator must "
+                "configure the INBOUND_EMAIL_DOMAIN environment variable."
             ),
             "url": None,
             "completed": bool(config and config["forwarding_verified"]) if config else False,
@@ -166,6 +185,32 @@ async def get_setup_guide(user_id: int = Depends(get_current_user_id)):
         "6. Click 'Save'"
     )
 
+    admin_note = ""
+    if not domain_configured:
+        admin_note = (
+            "EMAIL DOMAIN NOT CONFIGURED\n\n"
+            "An administrator must set the INBOUND_EMAIL_DOMAIN environment variable "
+            "to enable email integration. Steps:\n\n"
+            "1. Choose an inbound email service (SendGrid Inbound Parse, Postmark, Mailgun, etc.)\n"
+            "2. Register a domain (e.g. mail.yourdomain.com) with your email service provider\n"
+            "3. Add MX records for that domain pointing to the email service:\n"
+            "   - For SendGrid: mx.sendgrid.net (priority 10)\n"
+            "   - For Postmark: inbound.postmarkapp.com (priority 10)\n"
+            "   - For Mailgun: check Mailgun dashboard for MX values\n"
+            "4. Configure the email service to POST parsed emails to:\n"
+            "   https://app-ujjdvsxl.fly.dev/api/email/webhook/sendgrid\n"
+            "5. Set INBOUND_EMAIL_DOMAIN=mail.yourdomain.com on your deployment\n\n"
+            "Once configured, each user will get a unique address like:\n"
+            "   case-<unique_hash>@mail.yourdomain.com"
+        )
+    else:
+        admin_note = (
+            f"Email domain configured: {domain}\n\n"
+            "Make sure your inbound email service is set to POST parsed emails to:\n"
+            "   https://app-ujjdvsxl.fly.dev/api/email/webhook/sendgrid\n\n"
+            "And that MX records for your domain point to your email service provider."
+        )
+
     return EmailSetupGuide(
         inbound_email=inbound_email,
         forwarding_verified=bool(config and config["forwarding_verified"]) if config else False,
@@ -175,8 +220,11 @@ async def get_setup_guide(user_id: int = Depends(get_current_user_id)):
         privacy_note=(
             "We only parse court notification emails. All other emails "
             "forwarded to this address are automatically discarded without "
-            "being read or stored. Your privacy is our top priority."
+            "being read or stored. Your email data is processed securely "
+            "and only court-related information is retained."
         ),
+        domain_configured=domain_configured,
+        admin_setup_note=admin_note,
     )
 
 
