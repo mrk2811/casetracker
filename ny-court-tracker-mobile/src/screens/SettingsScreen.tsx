@@ -1,11 +1,10 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, createElement } from "react";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Pressable,
   Switch,
   ActivityIndicator,
   Alert,
@@ -450,36 +449,102 @@ export default function SettingsScreen() {
       </View>
 
       {/* Sign Out */}
-      {showLogoutConfirm ? (
-        <View style={styles.logoutConfirmCard}>
-          <Text style={styles.logoutConfirmTitle}>Sign Out</Text>
-          <Text style={styles.logoutConfirmMessage}>Are you sure you want to sign out?</Text>
-          <View style={styles.logoutConfirmButtons}>
-            <Pressable
-              style={styles.logoutCancelBtn}
-              onPress={cancelLogout}
-              {...(Platform.OS === 'web' ? { onClick: cancelLogout } as any : {})}
-            >
-              <Text style={styles.logoutCancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={styles.logoutConfirmBtn}
-              onPress={confirmLogout}
-              {...(Platform.OS === 'web' ? { onClick: confirmLogout } as any : {})}
-            >
-              <Text style={styles.logoutConfirmBtnText}>Sign Out</Text>
-            </Pressable>
-          </View>
-        </View>
+      {Platform.OS === 'web' ? (
+        showLogoutConfirm ? (
+          createElement('div', {
+            style: {
+              backgroundColor: '#fff',
+              borderRadius: 12,
+              padding: 20,
+              border: '1px solid #fecaca',
+              display: 'flex',
+              flexDirection: 'column' as const,
+              alignItems: 'center',
+            },
+          },
+            createElement('div', {
+              style: { fontSize: 17, fontWeight: '600', color: '#18181b', marginBottom: 6 },
+            }, 'Sign Out'),
+            createElement('div', {
+              style: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
+            }, 'Are you sure you want to sign out?'),
+            createElement('div', {
+              style: { display: 'flex', flexDirection: 'row' as const, gap: 12, width: '100%' },
+            },
+              createElement('button', {
+                onClick: cancelLogout,
+                style: {
+                  flex: 1,
+                  padding: '12px 0',
+                  borderRadius: 8,
+                  border: '1px solid #d1d5db',
+                  backgroundColor: '#fff',
+                  fontSize: 15,
+                  fontWeight: '500',
+                  color: '#374151',
+                  cursor: 'pointer',
+                },
+              }, 'Cancel'),
+              createElement('button', {
+                onClick: confirmLogout,
+                style: {
+                  flex: 1,
+                  padding: '12px 0',
+                  borderRadius: 8,
+                  border: 'none',
+                  backgroundColor: '#ef4444',
+                  fontSize: 15,
+                  fontWeight: '600',
+                  color: '#fff',
+                  cursor: 'pointer',
+                },
+              }, 'Sign Out'),
+            ),
+          )
+        ) : (
+          createElement('button', {
+            onClick: handleLogout,
+            style: {
+              display: 'flex',
+              flexDirection: 'row' as const,
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              padding: '14px 0',
+              border: '1px solid #fecaca',
+              borderRadius: 10,
+              backgroundColor: '#fff',
+              width: '100%',
+              cursor: 'pointer',
+              fontSize: 16,
+              fontWeight: '500',
+              color: '#ef4444',
+            },
+          },
+            createElement('span', { style: { fontSize: 20 } }, '\u{1F6AA}'),
+            'Sign Out',
+          )
+        )
       ) : (
-        <Pressable
-          style={styles.signOutButton}
-          onPress={handleLogout}
-          {...(Platform.OS === 'web' ? { onClick: handleLogout } as any : {})}
-        >
-          <Ionicons name="log-out-outline" size={20} color="#ef4444" />
-          <Text style={styles.signOutText}>Sign Out</Text>
-        </Pressable>
+        showLogoutConfirm ? (
+          <View style={styles.logoutConfirmCard}>
+            <Text style={styles.logoutConfirmTitle}>Sign Out</Text>
+            <Text style={styles.logoutConfirmMessage}>Are you sure you want to sign out?</Text>
+            <View style={styles.logoutConfirmButtons}>
+              <TouchableOpacity style={styles.logoutCancelBtn} onPress={cancelLogout}>
+                <Text style={styles.logoutCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.logoutConfirmBtn} onPress={confirmLogout}>
+                <Text style={styles.logoutConfirmBtnText}>Sign Out</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+            <Text style={styles.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
+        )
       )}
 
       <View style={{ height: 40 }} />
