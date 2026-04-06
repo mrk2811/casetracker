@@ -1,8 +1,7 @@
 """
 Email webhook handler for inbound email services.
 
-Supports SendGrid Inbound Parse webhook format.
-Can be extended to support Postmark, Mailgun, etc.
+Supports Mailgun and SendGrid Inbound Parse webhook formats.
 
 The webhook receives parsed email data from the inbound
 email service and processes it through the email parser
@@ -11,6 +10,7 @@ and deduplication engine.
 
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -18,10 +18,15 @@ from app.database import get_db
 from app.email.parser import parse_multi_case_email, is_court_notification
 from app.email.dedup import process_email_events
 
+INBOUND_EMAIL_DOMAIN = os.environ.get(
+    "INBOUND_EMAIL_DOMAIN",
+    "sandboxd49565360f644e5385986fc016c23e16.mailgun.org",
+)
+
 logger = logging.getLogger(__name__)
 
 
-def generate_inbound_email(user_id: int, domain: str = "courttracker.app") -> str:
+def generate_inbound_email(user_id: int, domain: str = INBOUND_EMAIL_DOMAIN) -> str:
     """
     Generate a unique inbound email address for a user.
     
@@ -47,7 +52,7 @@ def get_user_id_from_inbound_email(inbound_email: str) -> Optional[int]:
         return row["user_id"] if row else None
 
 
-def setup_user_email(user_id: int, domain: str = "courttracker.app") -> dict:
+def setup_user_email(user_id: int, domain: str = INBOUND_EMAIL_DOMAIN) -> dict:
     """
     Set up email integration for a user.
     
@@ -66,6 +71,21 @@ def setup_user_email(user_id: int, domain: str = "courttracker.app") -> dict:
         ).fetchone()
 
         if existing:
+            # Migrate old email addresses to the current domain
+            old_email = existing["inbound_email"]
+            if old_email and not old_email.endswith(f"@{domain}"):
+                new_email = inbound_email
+                conn.execute(
+                    "UPDATE email_configs SET inbound_email = ?, provider = 'mailgun_inbound' WHERE user_id = ?",
+                    (new_email, user_id),
+                )
+                logger.info(f"Migrated user {user_id} email from {old_email} to {new_email}")
+                return {
+                    "inbound_email": new_email,
+                    "forwarding_verified": bool(existing["forwarding_verified"]),
+                    "provider": "mailgun_inbound",
+                    "already_setup": True,
+                }
             return {
                 "inbound_email": existing["inbound_email"],
                 "forwarding_verified": bool(existing["forwarding_verified"]),
@@ -78,14 +98,14 @@ def setup_user_email(user_id: int, domain: str = "courttracker.app") -> dict:
         conn.execute(
             """INSERT INTO email_configs 
                (user_id, inbound_email, forwarding_verified, provider, created_at)
-               VALUES (?, ?, 0, 'sendgrid_inbound', ?)""",
+               VALUES (?, ?, 0, 'mailgun_inbound', ?)""",
             (user_id, inbound_email, now),
         )
 
     return {
         "inbound_email": inbound_email,
         "forwarding_verified": False,
-        "provider": "sendgrid_inbound",
+        "provider": "mailgun_inbound",
         "already_setup": False,
     }
 
@@ -217,6 +237,33 @@ def process_sendgrid_webhook(form_data: dict) -> dict:
         "events_found": len(parsed.events),
         "results": results,
     }
+
+
+def process_mailgun_webhook(form_data: dict) -> dict:
+    """
+    Process a Mailgun inbound email webhook payload.
+
+    Mailgun sends parsed email data as multipart form data:
+    - recipient: recipient email
+    - sender: sender email
+    - from: sender with display name
+    - subject: email subject
+    - body-plain: plain text body
+    - body-html: HTML body
+    - stripped-text: text without signature/quoted parts
+    - stripped-html: HTML without signature/quoted parts
+
+    We normalize the Mailgun fields to match our internal format
+    and reuse the same processing pipeline.
+    """
+    normalized = {
+        "to": form_data.get("recipient", ""),
+        "from": form_data.get("sender", form_data.get("from", "")),
+        "subject": form_data.get("subject", ""),
+        "text": form_data.get("body-plain", ""),
+        "html": form_data.get("body-html", ""),
+    }
+    return process_sendgrid_webhook(normalized)
 
 
 def _extract_inbound_address(recipient: str) -> Optional[str]:
