@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  Modal,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -119,6 +118,15 @@ export default function SettingsScreen() {
         { text: "Sign Out", style: "destructive", onPress: logout },
       ]);
     }
+  };
+
+  const confirmLogout = () => {
+    setShowLogoutConfirm(false);
+    logout();
+  };
+
+  const cancelLogout = () => {
+    setShowLogoutConfirm(false);
   };
 
   if (loading) {
@@ -441,44 +449,28 @@ export default function SettingsScreen() {
       </View>
 
       {/* Sign Out */}
-      <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
-        <Ionicons name="log-out-outline" size={20} color="#ef4444" />
-        <Text style={styles.signOutText}>Sign Out</Text>
-      </TouchableOpacity>
+      {showLogoutConfirm ? (
+        <View style={styles.logoutConfirmCard}>
+          <Text style={styles.logoutConfirmTitle}>Sign Out</Text>
+          <Text style={styles.logoutConfirmMessage}>Are you sure you want to sign out?</Text>
+          <View style={styles.logoutConfirmButtons}>
+            <TouchableOpacity style={styles.logoutCancelBtn} onPress={cancelLogout}>
+              <Text style={styles.logoutCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.logoutConfirmBtn} onPress={confirmLogout}>
+              <Text style={styles.logoutConfirmBtnText}>Sign Out</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
+          <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+          <Text style={styles.signOutText}>Sign Out</Text>
+        </TouchableOpacity>
+      )}
 
       <View style={{ height: 40 }} />
 
-      {/* Logout Confirmation Modal (web) */}
-      <Modal
-        visible={showLogoutConfirm}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowLogoutConfirm(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Sign Out</Text>
-            <Text style={styles.modalMessage}>Are you sure you want to sign out?</Text>
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={styles.modalCancelButton}
-                onPress={() => setShowLogoutConfirm(false)}
-              >
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.modalSignOutButton}
-                onPress={() => {
-                  setShowLogoutConfirm(false);
-                  logout();
-                }}
-              >
-                <Text style={styles.modalSignOutText}>Sign Out</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </ScrollView>
   );
 }
@@ -603,37 +595,31 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "600",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  modalContent: {
+  logoutConfirmCard: {
     backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 24,
-    width: 300,
+    borderRadius: 12,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "#fecaca",
     alignItems: "center",
   },
-  modalTitle: {
-    fontSize: 18,
+  logoutConfirmTitle: {
+    fontSize: 17,
     fontWeight: "600",
     color: "#18181b",
-    marginBottom: 8,
+    marginBottom: 6,
   },
-  modalMessage: {
+  logoutConfirmMessage: {
     fontSize: 14,
     color: "#6b7280",
-    textAlign: "center",
-    marginBottom: 20,
+    marginBottom: 16,
   },
-  modalButtons: {
+  logoutConfirmButtons: {
     flexDirection: "row",
     gap: 12,
     width: "100%",
   },
-  modalCancelButton: {
+  logoutCancelBtn: {
     flex: 1,
     paddingVertical: 12,
     borderRadius: 8,
@@ -641,19 +627,19 @@ const styles = StyleSheet.create({
     borderColor: "#d1d5db",
     alignItems: "center",
   },
-  modalCancelText: {
+  logoutCancelText: {
     fontSize: 15,
     fontWeight: "500",
     color: "#374151",
   },
-  modalSignOutButton: {
+  logoutConfirmBtn: {
     flex: 1,
     paddingVertical: 12,
     borderRadius: 8,
     backgroundColor: "#ef4444",
     alignItems: "center",
   },
-  modalSignOutText: {
+  logoutConfirmBtnText: {
     fontSize: 15,
     fontWeight: "600",
     color: "#fff",
