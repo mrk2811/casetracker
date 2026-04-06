@@ -8,6 +8,7 @@ import {
   Switch,
   ActivityIndicator,
   Alert,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -108,10 +109,16 @@ export default function SettingsScreen() {
   };
 
   const handleLogout = () => {
-    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Sign Out", style: "destructive", onPress: logout },
-    ]);
+    if (Platform.OS === "web") {
+      if (window.confirm("Are you sure you want to sign out?")) {
+        logout();
+      }
+    } else {
+      Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Sign Out", style: "destructive", onPress: logout },
+      ]);
+    }
   };
 
   if (loading) {
