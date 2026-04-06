@@ -15,6 +15,7 @@ from app.email.webhook import (
     setup_user_email,
     verify_forwarding,
     process_sendgrid_webhook,
+    process_mailgun_webhook,
 )
 from app.schemas import (
     EmailSetupResponse,
@@ -235,6 +236,39 @@ async def sendgrid_webhook(request: Request):
 
     except Exception as e:
         logger.error(f"Webhook processing error: {e}")
+        return EmailWebhookResponse(
+            status="error",
+            events_found=0,
+            message=str(e),
+        )
+
+
+@router.post("/webhook/mailgun", response_model=EmailWebhookResponse)
+async def mailgun_webhook(request: Request):
+    """
+    Mailgun inbound email webhook endpoint.
+
+    This endpoint receives POST requests from Mailgun's inbound
+    routing when an email is received at any of our inbound addresses.
+
+    Mailgun sends form data with fields: recipient, sender, from,
+    subject, body-plain, body-html, stripped-text, stripped-html, etc.
+    """
+    try:
+        form = await request.form()
+        form_data = {key: form[key] for key in form}
+
+        result = process_mailgun_webhook(form_data)
+
+        return EmailWebhookResponse(
+            status=result.get("status", "error"),
+            events_found=result.get("events_found", 0),
+            message=result.get("reason", ""),
+            results=result.get("results", []),
+        )
+
+    except Exception as e:
+        logger.error(f"Mailgun webhook processing error: {e}")
         return EmailWebhookResponse(
             status="error",
             events_found=0,
