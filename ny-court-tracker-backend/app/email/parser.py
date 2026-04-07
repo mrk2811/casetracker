@@ -75,9 +75,15 @@ COURT_NOTIFICATION_SENDERS = [
 
 # Regex patterns for extracting case data from email body
 INDEX_NUMBER_PATTERN = re.compile(
-    r"(?:Index\s*(?:No\.?|Number|#)\s*[:.]?\s*)"
+    r"(?:Index\s*(?:No\.?|Number|#)\s*[:.]?\s*|Case\s*#?\s*[:.]?\s*)"
     r"(\d{3,6}/\d{2,4}|\d{5,12})",
     re.IGNORECASE,
+)
+
+# Fallback: catch bare index-number-like patterns (e.g. 152847/2026)
+# only used when the primary pattern finds nothing
+BARE_INDEX_PATTERN = re.compile(
+    r"\b(\d{3,6}/\d{4})\b",
 )
 
 CASE_TITLE_PATTERN = re.compile(
@@ -320,6 +326,13 @@ def parse_email(
             idx_match = INDEX_NUMBER_PATTERN.search(subject)
             if idx_match:
                 event.index_number = idx_match.group(1)
+            else:
+                # Fallback: look for bare index number pattern
+                bare_match = BARE_INDEX_PATTERN.search(text)
+                if not bare_match:
+                    bare_match = BARE_INDEX_PATTERN.search(subject)
+                if bare_match:
+                    event.index_number = bare_match.group(1)
 
         # Extract case title (parties)
         title_match = CASE_TITLE_PATTERN.search(text)
