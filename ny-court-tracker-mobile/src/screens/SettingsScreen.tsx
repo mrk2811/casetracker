@@ -1,4 +1,4 @@
-import React, { useState, useCallback, createElement } from "react";
+import React, { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -39,7 +39,6 @@ export default function SettingsScreen() {
   const [emailStatus, setEmailStatus] = useState<{ configured: boolean; verified: boolean } | null>(null);
   const [discoverySettings, setDiscoverySettings] = useState<DiscoverySettings | null>(null);
   const [savingDiscovery, setSavingDiscovery] = useState(false);
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   const fetchSettings = async () => {
     setLoading(true);
@@ -111,22 +110,15 @@ export default function SettingsScreen() {
 
   const handleLogout = () => {
     if (Platform.OS === "web") {
-      setShowLogoutConfirm(true);
+      if (window.confirm("Are you sure you want to sign out?")) {
+        logout();
+      }
     } else {
       Alert.alert("Sign Out", "Are you sure you want to sign out?", [
         { text: "Cancel", style: "cancel" },
         { text: "Sign Out", style: "destructive", onPress: logout },
       ]);
     }
-  };
-
-  const confirmLogout = () => {
-    setShowLogoutConfirm(false);
-    logout();
-  };
-
-  const cancelLogout = () => {
-    setShowLogoutConfirm(false);
   };
 
   if (loading) {
@@ -449,88 +441,10 @@ export default function SettingsScreen() {
       </View>
 
       {/* Sign Out */}
-      {Platform.OS === 'web' ? (
-        showLogoutConfirm ? (
-          createElement('div', {
-            style: {
-              backgroundColor: '#fff',
-              borderRadius: 12,
-              padding: 20,
-              border: '1px solid #fecaca',
-              display: 'flex',
-              flexDirection: 'column' as const,
-              alignItems: 'center',
-            },
-          },
-            createElement('div', {
-              style: { fontSize: 17, fontWeight: '600', color: '#18181b', marginBottom: 6 },
-            }, 'Sign Out'),
-            createElement('div', {
-              style: { fontSize: 14, color: '#6b7280', marginBottom: 16 },
-            }, 'Are you sure you want to sign out?'),
-            createElement('div', {
-              style: { display: 'flex', flexDirection: 'row' as const, gap: 12, width: '100%' },
-            },
-              createElement('button', {
-                onClick: cancelLogout,
-                style: {
-                  flex: 1,
-                  padding: '12px 0',
-                  borderRadius: 8,
-                  border: '1px solid #d1d5db',
-                  backgroundColor: '#fff',
-                  fontSize: 15,
-                  fontWeight: '500',
-                  color: '#374151',
-                  cursor: 'pointer',
-                },
-              }, 'Cancel'),
-              createElement('button', {
-                onClick: confirmLogout,
-                style: {
-                  flex: 1,
-                  padding: '12px 0',
-                  borderRadius: 8,
-                  border: 'none',
-                  backgroundColor: '#ef4444',
-                  fontSize: 15,
-                  fontWeight: '600',
-                  color: '#fff',
-                  cursor: 'pointer',
-                },
-              }, 'Sign Out'),
-            ),
-          )
-        ) : (
-          createElement('button', {
-            onClick: handleLogout,
-            style: {
-              display: 'flex',
-              flexDirection: 'row' as const,
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 8,
-              padding: '14px 0',
-              border: '1px solid #fecaca',
-              borderRadius: 10,
-              backgroundColor: '#fff',
-              width: '100%',
-              cursor: 'pointer',
-              fontSize: 16,
-              fontWeight: '500',
-              color: '#ef4444',
-            },
-          },
-            createElement('span', { style: { fontSize: 20 } }, '\u{1F6AA}'),
-            'Sign Out',
-          )
-        )
-      ) : (
-        <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color="#ef4444" />
-          <Text style={styles.signOutText}>Sign Out</Text>
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity style={styles.signOutButton} onPress={handleLogout}>
+        <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+        <Text style={styles.signOutText}>Sign Out</Text>
+      </TouchableOpacity>
 
       <View style={{ height: 40 }} />
     </ScrollView>
