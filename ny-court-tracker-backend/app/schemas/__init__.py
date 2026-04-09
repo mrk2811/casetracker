@@ -32,6 +32,19 @@ class TokenOut(BaseModel):
     user: UserOut
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 # ─── Freshness ───
 class FreshnessInfo(BaseModel):
     """Freshness indicator data for a case."""

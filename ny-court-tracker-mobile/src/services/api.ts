@@ -183,6 +183,10 @@ export const authApi = {
   login: (data: { email: string; password: string }) =>
     api.post("/api/auth/login", data),
   me: () => api.get<User>("/api/auth/me"),
+  forgotPassword: (data: { email: string }) =>
+    api.post<{ message: string }>("/api/auth/forgot-password", data),
+  resetPassword: (data: { token: string; new_password: string }) =>
+    api.post<{ message: string }>("/api/auth/reset-password", data),
 };
 
 // Cases
