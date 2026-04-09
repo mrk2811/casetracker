@@ -131,7 +131,7 @@ async def list_notifications(
             title=row["title"],
             message=row["message"],
             read=bool(row["read"]),
-            push_sent=bool(row.get("push_sent", False)),
+            push_sent=bool(row["push_sent"]) if "push_sent" in row.keys() else False,
             created_at=row["created_at"],
         )
         for row in rows
