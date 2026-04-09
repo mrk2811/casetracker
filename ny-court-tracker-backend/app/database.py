@@ -231,6 +231,16 @@ def init_db():
                 next_run_at TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL,
+                expires_at TIMESTAMP NOT NULL,
+                used_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
         """)
 
         # Step 2: Migrate existing tables — add new columns if they don't exist
@@ -290,6 +300,8 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_discovered_cases_user_id ON discovered_cases(user_id);
             CREATE INDEX IF NOT EXISTS idx_discovered_cases_status ON discovered_cases(status);
             CREATE INDEX IF NOT EXISTS idx_discovery_settings_user_id ON discovery_settings(user_id);
+            CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id);
+            CREATE INDEX IF NOT EXISTS idx_password_resets_token_hash ON password_resets(token_hash);
         """)
 
         # Step 4: Seed default court configurations
