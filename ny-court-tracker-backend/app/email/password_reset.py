@@ -2,7 +2,8 @@
 
 import os
 import logging
-import requests
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -79,18 +80,18 @@ If you didn't request this password reset, you can safely ignore this email.
         return True
 
     try:
-        response = requests.post(
-            f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
-            auth=("api", MAILGUN_API_KEY),
-            data={
-                "from": FROM_EMAIL,
-                "to": [to_email],
-                "subject": subject,
-                "text": text_body,
-                "html": html_body,
-            },
-            timeout=10,
-        )
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(
+                f"https://api.mailgun.net/v3/{MAILGUN_DOMAIN}/messages",
+                auth=("api", MAILGUN_API_KEY),
+                data={
+                    "from": FROM_EMAIL,
+                    "to": to_email,
+                    "subject": subject,
+                    "text": text_body,
+                    "html": html_body,
+                },
+            )
         if response.status_code == 200:
             logger.info("Password reset email sent to %s", to_email)
             return True
