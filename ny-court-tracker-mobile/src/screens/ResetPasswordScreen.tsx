@@ -31,8 +31,8 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
       Alert.alert("Error", "Please enter a new password");
       return;
     }
-    if (newPassword.length < 6) {
-      Alert.alert("Error", "Password must be at least 6 characters");
+    if (newPassword.length < 7) {
+      Alert.alert("Error", "Password must be at least 7 characters");
       return;
     }
     if (newPassword !== confirmPassword) {

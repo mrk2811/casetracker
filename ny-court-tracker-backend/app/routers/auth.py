@@ -125,6 +125,12 @@ async def forgot_password(data: ForgotPasswordRequest):
 @router.post("/reset-password", response_model=MessageResponse)
 async def reset_password(data: ResetPasswordRequest):
     """Reset password using a valid reset token."""
+    if len(data.new_password) < 7:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 7 characters",
+        )
+
     token_hash = hashlib.sha256(data.token.encode()).hexdigest()
 
     with get_db() as conn:
