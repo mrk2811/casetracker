@@ -58,10 +58,22 @@ def find_matching_case(
             return dict(row)
 
         # Try partial match on index number (sometimes formats differ)
-        # e.g., "123456/2026" vs "123456"
+        # e.g., "123456/2026" vs "123456" or "CV-2026-00891" vs "CV-2026-00891"
         base_number = index_number.split("/")[0] if "/" in index_number else index_number
         query = "SELECT * FROM cases WHERE user_id = ? AND index_number LIKE ?"
         params = [user_id, f"%{base_number}%"]
+
+        if county:
+            query += " AND LOWER(county) = LOWER(?)"
+            params.append(county)
+
+        row = conn.execute(query, params).fetchone()
+        if row:
+            return dict(row)
+
+        # Try case-insensitive exact match (handles case sensitivity differences)
+        query = "SELECT * FROM cases WHERE user_id = ? AND UPPER(index_number) = UPPER(?)"
+        params = [user_id, index_number]
 
         if county:
             query += " AND LOWER(county) = LOWER(?)"

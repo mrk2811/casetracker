@@ -76,7 +76,7 @@ COURT_NOTIFICATION_SENDERS = [
 # Regex patterns for extracting case data from email body
 INDEX_NUMBER_PATTERN = re.compile(
     r"(?:Index\s*(?:No\.?|Number|#)\s*[:.]?\s*|Case\s*#?\s*[:.]?\s*)"
-    r"(\d{3,6}/\d{2,4}|\d{5,12})",
+    r"(\d{3,6}/\d{2,4}|\d{5,12}|[A-Z]{1,4}-\d{4}-\d{3,6})",
     re.IGNORECASE,
 )
 
@@ -84,6 +84,11 @@ INDEX_NUMBER_PATTERN = re.compile(
 # only used when the primary pattern finds nothing
 BARE_INDEX_PATTERN = re.compile(
     r"\b(\d{3,6}/\d{4})\b",
+)
+
+# Fallback: catch alphanumeric case numbers like CV-2026-00891, CR-2025-12345
+ALPHANUMERIC_INDEX_PATTERN = re.compile(
+    r"\b([A-Z]{1,4}-\d{4}-\d{3,6})\b",
 )
 
 CASE_TITLE_PATTERN = re.compile(
@@ -189,6 +194,9 @@ def is_court_notification(sender: str, subject: str, body: str) -> bool:
         r"(?i)criminal\s*court",
         r"(?i)nyscef",
         r"(?i)etrack",
+        r"(?i)court\s+date",
+        r"(?i)\bCase\s+[A-Z]{1,4}-\d{4}-\d{3,6}\b",
+        r"(?i)(?:hearing|conference|appearance)\s+scheduled",
     ]
     body_preview = body[:500] if body else ""
     match_count = sum(1 for p in court_body_indicators if re.search(p, body_preview))
@@ -333,6 +341,13 @@ def parse_email(
                     bare_match = BARE_INDEX_PATTERN.search(subject)
                 if bare_match:
                     event.index_number = bare_match.group(1)
+                else:
+                    # Fallback: look for alphanumeric case numbers (e.g. CV-2026-00891)
+                    alpha_match = ALPHANUMERIC_INDEX_PATTERN.search(text)
+                    if not alpha_match:
+                        alpha_match = ALPHANUMERIC_INDEX_PATTERN.search(subject)
+                    if alpha_match:
+                        event.index_number = alpha_match.group(1)
 
         # Extract case title (parties)
         title_match = CASE_TITLE_PATTERN.search(text)
@@ -414,6 +429,14 @@ def parse_multi_case_email(
 
     # Look for multiple index numbers in the body
     all_indices = INDEX_NUMBER_PATTERN.findall(text)
+    # Also check for alphanumeric case numbers
+    alpha_indices = ALPHANUMERIC_INDEX_PATTERN.findall(text)
+    # Merge unique index numbers (avoid duplicates already captured by primary pattern)
+    seen = set(all_indices)
+    for idx in alpha_indices:
+        if idx not in seen:
+            all_indices.append(idx)
+            seen.add(idx)
 
     if len(all_indices) <= 1:
         return result  # Single case, already parsed
@@ -423,8 +446,8 @@ def parse_multi_case_email(
     for idx_num in all_indices:
         # Find the section around this index number
         pattern = re.compile(
-            rf"(?:Index\s*(?:No\.?|Number|#)\s*[:.]?\s*{re.escape(idx_num)})"
-            r"([\s\S]*?)(?=Index\s*(?:No\.?|Number|#)|$)",
+            rf"(?:(?:Index\s*(?:No\.?|Number|#)|Case)\s*[:.]?\s*{re.escape(idx_num)})"
+            r"([\s\S]*?)(?=(?:Index\s*(?:No\.?|Number|#)|Case)\s*[:.]?\s*[A-Z0-9]|$)",
             re.IGNORECASE,
         )
         section_match = pattern.search(text)
