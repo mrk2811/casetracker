@@ -1,8 +1,12 @@
 """
-NY WebCivil adapter - scrapes iapps.courts.state.ny.us/webcivil.
+NY WebCivil adapter — scrapes iapps.courts.state.ny.us court systems.
 
-Implements search by index number and party name, case detail parsing,
-appearance extraction, and health checks for the NY WebCivil Supreme system.
+Supports two court systems on the same domain:
+- WebCivil Supreme  (/webcivil/FCASSearch) — Supreme & County Court cases.
+- WebCivil Local    (/webcivilLocal/LCSearch) — Local Civil Courts including
+  Housing Court / Landlord-Tenant, City Courts, District Courts.
+
+The adapter auto-detects which system to query based on the index number format.
 """
 
 import logging
@@ -25,13 +29,30 @@ from app.scraper.browser_engine import BrowserEngine
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://iapps.courts.state.ny.us/webcivil"
+# ---------------------------------------------------------------------------
+# Base URLs for the two court systems
+# ---------------------------------------------------------------------------
+BASE_URL_SUPREME = "https://iapps.courts.state.ny.us/webcivil"
+BASE_URL_LOCAL = "https://iapps.courts.state.ny.us/webcivilLocal"
 
-# URL of the WebCivil search form pages (used by the browser fallback)
-# The actual search form (with input fields) lives at FCASSearch?param=<type>,
-# NOT at FCASMain which is just the landing/welcome page.
-INDEX_SEARCH_FORM_URL = f"{BASE_URL}/FCASSearch?param=I"
-PARTY_SEARCH_FORM_URL = f"{BASE_URL}/FCASSearch?param=P"
+# Keep the old name as an alias so existing code that imports it still works.
+BASE_URL = BASE_URL_SUPREME
+
+# Search-form URLs (used by the browser fallback to establish sessions)
+SUPREME_INDEX_SEARCH_URL = f"{BASE_URL_SUPREME}/FCASSearch?param=I"
+SUPREME_PARTY_SEARCH_URL = f"{BASE_URL_SUPREME}/FCASSearch?param=P"
+LOCAL_INDEX_SEARCH_URL = f"{BASE_URL_LOCAL}/LCSearch?param=I"
+LOCAL_PARTY_SEARCH_URL = f"{BASE_URL_LOCAL}/LCSearch?param=P"
+
+# Regex that matches a Local Civil Court index number.
+# Format: <CaseType>-<Number>-<Year>/<CourtCode>
+# e.g. LT-332489-24/BX, CV-000044-06/AU, SC-1234-23/NY
+_LOCAL_INDEX_RE = re.compile(
+    r"^(?P<case_type>[A-Z]{2})-(?P<number>\d+)-(?P<year>\d{2})/(?P<court>[A-Z]{2})$"
+)
+
+# Valid Local Civil case-type prefixes
+_LOCAL_CASE_TYPES = {"CC", "CV", "LT", "MI", "NC", "RE", "SC", "TS"}
 
 # Mapping of county names to court select values used by WebCivil
 COUNTY_COURT_VALUES: dict[str, dict[str, str]] = {
@@ -101,12 +122,45 @@ COUNTY_COURT_VALUES: dict[str, dict[str, str]] = {
 
 
 def _get_court_value(county: str) -> Optional[str]:
-    """Look up the WebCivil court select value for a county."""
+    """Look up the WebCivil Supreme court select value for a county."""
     county_lower = county.lower().strip()
     courts = COUNTY_COURT_VALUES.get(county_lower)
     if not courts:
         return None
     return courts.get("supreme") or courts.get("county")
+
+
+def _is_local_index(index_number: str) -> bool:
+    """Return True if *index_number* matches the Local Civil format."""
+    return bool(_LOCAL_INDEX_RE.match(index_number.strip().upper()))
+
+
+def _parse_local_index(index_number: str) -> Optional[dict[str, str]]:
+    """Parse a Local Civil index number into its component parts.
+
+    Returns a dict with keys ``case_type``, ``number``, ``year``, ``court``
+    or *None* if the string doesn't match the expected format.
+    """
+    m = _LOCAL_INDEX_RE.match(index_number.strip().upper())
+    if not m:
+        return None
+    return m.groupdict()
+
+
+def _detect_captcha_intercept(html: str) -> bool:
+    """Return True if the HTML is the Terms-of-Use / hCaptcha intercept page.
+
+    Both webcivil and webcivilLocal use a server-side intercept that shows a
+    Terms of Use page with an hCaptcha checkbox.  This is triggered by IP
+    reputation (server IPs are more likely to see it than residential IPs).
+    """
+    lower = html.lower()
+    return (
+        "captcha-intercept-page" in lower
+        or ("h-captcha" in lower and "terms of use" in lower)
+        or ("hcaptcha" in lower and "terms of use" in lower)
+        or ("i am human" in lower and ("hcaptcha" in lower or "h-captcha" in lower))
+    )
 
 
 def _clean_text(text: Optional[str]) -> Optional[str]:
@@ -118,16 +172,18 @@ def _clean_text(text: Optional[str]) -> Optional[str]:
 
 
 def _parse_search_results_table(soup: BeautifulSoup) -> list[dict]:
-    """
-    Parse the search results table from WebCivil.
-    Each case row contains a link to FCASCaseDetail.
+    """Parse the search results table from WebCivil Supreme or Local.
+
+    Supreme results contain links to ``FCASCaseDetail``.
+    Local results contain links to ``LCCaseInfo``.
     """
     results = []
 
     all_links = soup.find_all("a")
     for link in all_links:
         href = link.get("href", "")
-        if "FCASCaseDetail" not in href:
+        # Accept both Supreme and Local detail links
+        if "FCASCaseDetail" not in href and "LCCaseInfo" not in href:
             continue
 
         index_text = _clean_text(link.get_text())
@@ -332,15 +388,26 @@ def _parse_appearances_from_detail(soup: BeautifulSoup) -> list[dict]:
 
 
 class NYWebCivilAdapter(CourtAdapter):
-    """
-    Adapter for NY WebCivil (Supreme & Civil Courts).
-    Covers Supreme Court, Civil Court, and Housing Court cases.
-    Base URL: https://iapps.courts.state.ny.us/webcivil
+    """Adapter for NY WebCivil — Supreme *and* Local Civil courts.
 
-    Uses a two-tier scraping strategy:
-    1. Primary: fast httpx-based requests via ScraperEngine
-    2. Fallback: curl_cffi with browser TLS impersonation via BrowserEngine
-       when the primary request fails (e.g. Cloudflare challenge, CAPTCHA, HTTP 403)
+    Supports two separate court systems on the same domain:
+
+    * **WebCivil Supreme** (``/webcivil/FCASSearch``)
+      Index numbers look like ``152847/2026``.
+    * **WebCivil Local** (``/webcivilLocal/LCSearch``)
+      Index numbers look like ``LT-332489-24/BX``.
+
+    The adapter auto-detects which system to query based on the index number
+    format and provides a two-tier scraping strategy:
+
+    1. Primary — fast ``httpx``-based requests via :class:`ScraperEngine`.
+    2. Fallback — ``curl_cffi`` with browser TLS impersonation via
+       :class:`BrowserEngine` when the primary request fails (Cloudflare
+       challenge, CAPTCHA, HTTP 403).
+
+    If the server responds with a Terms-of-Use / hCaptcha intercept page
+    (common for cloud/server IPs), the adapter returns an empty result set
+    with an appropriate log warning rather than silently failing.
     """
 
     def __init__(self) -> None:
@@ -362,7 +429,6 @@ class NYWebCivilAdapter(CourtAdapter):
         """Decide whether to retry the request with the headless browser."""
         if result.success:
             return False
-        # Retry on Cloudflare challenge, CAPTCHA, or HTTP 403
         if result.cloudflare_detected or result.captcha_detected:
             return True
         if result.status_code == 403:
@@ -375,29 +441,44 @@ class NYWebCivilAdapter(CourtAdapter):
 
     @property
     def display_name(self) -> str:
-        return "NY WebCivil (Supreme & Civil)"
+        return "NY WebCivil (Supreme & Local Civil)"
 
     @property
     def state(self) -> str:
         return "NY"
 
+    # ------------------------------------------------------------------
+    # Search entry-point
+    # ------------------------------------------------------------------
+
     async def search(self, params: SearchParams) -> list[CourtRecord]:
-        """Search NY WebCivil for cases by index number or party name."""
+        """Search NY WebCivil for cases by index number or party name.
+
+        Automatically routes to the correct court system (Supreme vs Local)
+        based on the index number format.
+        """
         engine = self._get_engine()
 
         if params.index_number:
-            return await self._search_by_index(engine, params)
+            # Auto-detect: Local Civil index numbers have a specific format
+            if _is_local_index(params.index_number):
+                return await self._search_local_by_index(engine, params)
+            return await self._search_supreme_by_index(engine, params)
         elif params.plaintiff or params.defendant:
             return await self._search_by_party(engine, params)
         else:
             logger.warning("No search parameters provided for NYWebCivil search")
             return []
 
-    async def _search_by_index(
+    # ------------------------------------------------------------------
+    # Supreme Court — index search
+    # ------------------------------------------------------------------
+
+    async def _search_supreme_by_index(
         self, engine: ScraperEngine, params: SearchParams
     ) -> list[CourtRecord]:
-        """Search by index number, falling back to headless browser on failure."""
-        search_url = f"{BASE_URL}/FCASSearch"
+        """Search WebCivil Supreme by index number."""
+        search_url = f"{BASE_URL_SUPREME}/FCASSearch"
 
         form_data: dict[str, str] = {
             "txtIndex": params.index_number or "",
@@ -412,7 +493,7 @@ class NYWebCivilAdapter(CourtAdapter):
                 form_data["cboCourt"] = court_value
 
         logger.info(
-            "Searching NYWebCivil by index: %s (county: %s)",
+            "Searching WebCivil Supreme by index: %s (county: %s)",
             params.index_number,
             params.county,
         )
@@ -422,55 +503,53 @@ class NYWebCivilAdapter(CourtAdapter):
         if not result.success:
             if self._should_fallback(result):
                 logger.info(
-                    "httpx request failed (%s), retrying with headless browser",
+                    "httpx request failed (%s), retrying with browser fallback",
                     result.error_message,
                 )
-                result = await self._browser_search_by_index(params, form_data)
+                result = await self._browser_search_supreme_index(params, form_data)
             else:
                 if result.captcha_detected:
-                    logger.warning("CAPTCHA blocked NYWebCivil index search")
+                    logger.warning("CAPTCHA blocked WebCivil Supreme index search")
                 return []
 
         if not result.success or not result.soup:
             return []
 
+        # Check for hCaptcha intercept page
+        if result.html and _detect_captcha_intercept(result.html):
+            logger.warning(
+                "WebCivil Supreme returned hCaptcha intercept page — "
+                "search blocked by IP reputation"
+            )
+            return []
+
         return self._parse_search_results(result.soup, params)
 
-    async def _browser_search_by_index(
+    async def _browser_search_supreme_index(
         self,
         params: SearchParams,
         form_data: dict[str, str],
     ) -> "ScrapeResult":
-        """Perform an index-number search using the curl_cffi browser fallback.
-
-        The WebCivil search requires:
-        1. GET the search form page (FCASSearch?param=I) to establish a
-           server-side session (JSESSIONID cookie).  The landing page
-           (FCASMain) does NOT set up the session correctly.
-        2. POST the form data including hidden fields that the server expects.
-        """
-        from app.scraper.engine import ScrapeResult  # local to avoid circular at module level
+        """Browser fallback for WebCivil Supreme index search."""
+        from app.scraper.engine import ScrapeResult
 
         browser = self._get_browser_engine()
 
         logger.info(
-            "Browser fallback: searching by index %s (county: %s)",
+            "Browser fallback (Supreme): index %s (county: %s)",
             params.index_number,
             params.county,
         )
 
         try:
-            # GET the *search form* page (not the landing page) to
-            # establish a proper server-side session with JSESSIONID.
-            form_page = await browser.get(INDEX_SEARCH_FORM_URL)
+            form_page = await browser.get(SUPREME_INDEX_SEARCH_URL)
             if not form_page.success:
                 logger.warning(
-                    "Browser fallback: could not load index search form (HTTP %s)",
+                    "Browser fallback: could not load Supreme index form (HTTP %s)",
                     form_page.status_code,
                 )
                 return form_page
 
-            # Build POST payload with all hidden fields the form expects
             post_data: dict[str, str] = {
                 "hWhichPage": "I",
                 "hCourtType": "Supreme",
@@ -483,24 +562,158 @@ class NYWebCivilAdapter(CourtAdapter):
                 "cboYearOfFiling": "0",
                 "btnFindCase": "Find Case(s)",
             }
-            # Overlay the caller-supplied fields (txtIndex, cboCourt, etc.)
             post_data.update(form_data)
 
-            search_url = f"{BASE_URL}/FCASSearch"
-            result = await browser.post_form(url=search_url, data=post_data)
+            result = await browser.post_form(
+                url=f"{BASE_URL_SUPREME}/FCASSearch", data=post_data
+            )
+
+            # Detect hCaptcha intercept
+            if result.success and result.html and _detect_captcha_intercept(result.html):
+                logger.warning("Browser fallback (Supreme): hCaptcha intercept detected")
+                return ScrapeResult(
+                    success=False,
+                    html=result.html,
+                    status_code=result.status_code,
+                    error_message="hCaptcha intercept — search blocked by server",
+                    captcha_detected=True,
+                )
+
             return result
         except Exception as exc:
-            logger.error("Browser fallback failed for index search: %s", exc)
+            logger.error("Browser fallback failed for Supreme index search: %s", exc)
             return ScrapeResult(
                 success=False,
                 error_message=f"Browser fallback error: {exc}",
             )
 
+    # ------------------------------------------------------------------
+    # Local Civil Court — index search
+    # ------------------------------------------------------------------
+
+    async def _search_local_by_index(
+        self, engine: ScraperEngine, params: SearchParams
+    ) -> list[CourtRecord]:
+        """Search WebCivil Local by index number (e.g. LT-332489-24/BX)."""
+        parsed = _parse_local_index(params.index_number or "")
+        if not parsed:
+            logger.warning(
+                "Could not parse local index number: %s", params.index_number
+            )
+            return []
+
+        search_url = f"{BASE_URL_LOCAL}/LCSearch"
+
+        form_data: dict[str, str] = {
+            "hWhichPage": "I",
+            "hCourtType": "Local",
+            "hPageNumber": "1",
+            "hSearchKey": "",
+            "cboCaseType": parsed["case_type"],
+            "txtIndexNumber": parsed["number"],
+            "txtIndexYear": parsed["year"],
+            "cboIndexCourtIndicator": parsed["court"],
+            "cboSort": "court",
+            "rbOutputFormat": "HTML",
+            "btnFindCase": "Find Case(s)",
+        }
+
+        logger.info(
+            "Searching WebCivil Local by index: %s "
+            "(type=%s, number=%s, year=%s, court=%s)",
+            params.index_number,
+            parsed["case_type"],
+            parsed["number"],
+            parsed["year"],
+            parsed["court"],
+        )
+
+        # Try httpx first
+        result = await engine.post(search_url, data=form_data)
+
+        if not result.success:
+            if self._should_fallback(result):
+                logger.info(
+                    "httpx request failed (%s), retrying Local search with browser",
+                    result.error_message,
+                )
+                result = await self._browser_search_local_index(
+                    params, form_data, parsed
+                )
+            else:
+                if result.captcha_detected:
+                    logger.warning("CAPTCHA blocked WebCivil Local index search")
+                return []
+
+        if not result.success or not result.soup:
+            return []
+
+        # Check for hCaptcha intercept
+        if result.html and _detect_captcha_intercept(result.html):
+            logger.warning(
+                "WebCivil Local returned hCaptcha intercept page — "
+                "search blocked by IP reputation"
+            )
+            return []
+
+        return self._parse_search_results(result.soup, params, is_local=True)
+
+    async def _browser_search_local_index(
+        self,
+        params: SearchParams,
+        form_data: dict[str, str],
+        parsed: dict[str, str],
+    ) -> "ScrapeResult":
+        """Browser fallback for WebCivil Local index search."""
+        from app.scraper.engine import ScrapeResult
+
+        browser = self._get_browser_engine()
+
+        logger.info(
+            "Browser fallback (Local): index %s", params.index_number
+        )
+
+        try:
+            form_page = await browser.get(LOCAL_INDEX_SEARCH_URL)
+            if not form_page.success:
+                logger.warning(
+                    "Browser fallback: could not load Local index form (HTTP %s)",
+                    form_page.status_code,
+                )
+                return form_page
+
+            result = await browser.post_form(
+                url=f"{BASE_URL_LOCAL}/LCSearch", data=form_data
+            )
+
+            # Detect hCaptcha intercept
+            if result.success and result.html and _detect_captcha_intercept(result.html):
+                logger.warning("Browser fallback (Local): hCaptcha intercept detected")
+                return ScrapeResult(
+                    success=False,
+                    html=result.html,
+                    status_code=result.status_code,
+                    error_message="hCaptcha intercept — search blocked by server",
+                    captcha_detected=True,
+                )
+
+            return result
+        except Exception as exc:
+            logger.error("Browser fallback failed for Local index search: %s", exc)
+            return ScrapeResult(
+                success=False,
+                error_message=f"Browser fallback error: {exc}",
+            )
+
+    # ------------------------------------------------------------------
+    # Party search (Supreme only for now)
+    # ------------------------------------------------------------------
+
     async def _search_by_party(
         self, engine: ScraperEngine, params: SearchParams
     ) -> list[CourtRecord]:
         """Search by party name, falling back to headless browser on failure."""
-        search_url = f"{BASE_URL}/FCASSearch"
+        search_url = f"{BASE_URL_SUPREME}/FCASSearch"
 
         form_data: dict[str, str] = {
             "cboSort": "index_number",
@@ -529,10 +742,10 @@ class NYWebCivilAdapter(CourtAdapter):
         if not result.success:
             if self._should_fallback(result):
                 logger.info(
-                    "httpx request failed (%s), retrying party search with headless browser",
+                    "httpx request failed (%s), retrying party search with browser",
                     result.error_message,
                 )
-                result = await self._browser_search_by_party(params, form_data)
+                result = await self._browser_search_party(params, form_data)
             else:
                 if result.captcha_detected:
                     logger.warning("CAPTCHA blocked NYWebCivil party search")
@@ -541,27 +754,33 @@ class NYWebCivilAdapter(CourtAdapter):
         if not result.success or not result.soup:
             return []
 
+        # Check for hCaptcha intercept
+        if result.html and _detect_captcha_intercept(result.html):
+            logger.warning(
+                "WebCivil Supreme returned hCaptcha intercept on party search"
+            )
+            return []
+
         return self._parse_search_results(result.soup, params)
 
-    async def _browser_search_by_party(
+    async def _browser_search_party(
         self,
         params: SearchParams,
         form_data: dict[str, str],
     ) -> "ScrapeResult":
-        """Perform a party-name search using the curl_cffi browser fallback."""
+        """Browser fallback for party-name search."""
         from app.scraper.engine import ScrapeResult
 
         browser = self._get_browser_engine()
 
         logger.info(
-            "Browser fallback: searching by party plaintiff=%s defendant=%s",
+            "Browser fallback: party search plaintiff=%s defendant=%s",
             params.plaintiff,
             params.defendant,
         )
 
         try:
-            # GET the *party search form* page to establish session
-            form_page = await browser.get(PARTY_SEARCH_FORM_URL)
+            form_page = await browser.get(SUPREME_PARTY_SEARCH_URL)
             if not form_page.success:
                 logger.warning(
                     "Browser fallback: could not load party search form (HTTP %s)",
@@ -569,7 +788,6 @@ class NYWebCivilAdapter(CourtAdapter):
                 )
                 return form_page
 
-            # Build POST payload with all hidden fields
             post_data: dict[str, str] = {
                 "hWhichPage": "P",
                 "hCourtType": "Supreme",
@@ -584,8 +802,20 @@ class NYWebCivilAdapter(CourtAdapter):
             }
             post_data.update(form_data)
 
-            search_url = f"{BASE_URL}/FCASSearch"
-            result = await browser.post_form(url=search_url, data=post_data)
+            result = await browser.post_form(
+                url=f"{BASE_URL_SUPREME}/FCASSearch", data=post_data
+            )
+
+            if result.success and result.html and _detect_captcha_intercept(result.html):
+                logger.warning("Browser fallback: hCaptcha intercept on party search")
+                return ScrapeResult(
+                    success=False,
+                    html=result.html,
+                    status_code=result.status_code,
+                    error_message="hCaptcha intercept — search blocked by server",
+                    captcha_detected=True,
+                )
+
             return result
         except Exception as exc:
             logger.error("Browser fallback failed for party search: %s", exc)
@@ -594,8 +824,12 @@ class NYWebCivilAdapter(CourtAdapter):
                 error_message=f"Browser fallback error: {exc}",
             )
 
+    # ------------------------------------------------------------------
+    # Result parsing
+    # ------------------------------------------------------------------
+
     def _parse_search_results(
-        self, soup: BeautifulSoup, params: SearchParams
+        self, soup: BeautifulSoup, params: SearchParams, *, is_local: bool = False
     ) -> list[CourtRecord]:
         """Parse search results page into CourtRecord objects."""
         raw_results = _parse_search_results_table(soup)
@@ -616,15 +850,18 @@ class NYWebCivilAdapter(CourtAdapter):
             court_name = raw.get("court_name", "")
             if court_name:
                 county_match = re.match(
-                    r"(\w[\w\s.]+?)(?:\s+(?:Supreme|County)\s+Court)",
+                    r"(\w[\w\s.]+?)(?:\s+(?:Supreme|County|Civil|Housing)\s+Court)",
                     court_name,
                 )
                 if county_match:
                     county = county_match.group(1).strip()
 
+            # Determine court_type from context
+            court_type = params.court_type or ("local_civil" if is_local else "supreme")
+
             record = CourtRecord(
                 index_number=raw.get("index_number", ""),
-                court_type=params.court_type or "supreme",
+                court_type=court_type,
                 county=county,
                 case_year=case_year,
                 plaintiff=raw.get("plaintiff"),
@@ -636,6 +873,16 @@ class NYWebCivilAdapter(CourtAdapter):
 
         logger.info("NYWebCivil search returned %d results", len(records))
         return records
+
+    # ------------------------------------------------------------------
+    # Case details
+    # ------------------------------------------------------------------
+
+    def _base_url_for_detail(self, detail_url: str) -> str:
+        """Return the correct base URL depending on the detail link target."""
+        if "LCCaseInfo" in detail_url:
+            return BASE_URL_LOCAL
+        return BASE_URL_SUPREME
 
     async def get_case_details(
         self, index_number: str, court_type: str, county: str
@@ -658,10 +905,17 @@ class NYWebCivilAdapter(CourtAdapter):
 
         detail_url = record.raw_data.get("detail_url") if record.raw_data else None
         if detail_url:
+            base = self._base_url_for_detail(detail_url)
             if not detail_url.startswith("http"):
-                detail_url = f"{BASE_URL}/{detail_url}"
+                detail_url = f"{base}/{detail_url}"
 
             detail_result = await engine.get(detail_url)
+
+            # Fallback to browser if httpx is blocked
+            if not detail_result.success and self._should_fallback(detail_result):
+                browser = self._get_browser_engine()
+                detail_result = await browser.get(detail_url)
+
             if detail_result.success and detail_result.soup:
                 detail_data = _parse_case_detail_page(detail_result.soup)
 
@@ -677,10 +931,14 @@ class NYWebCivilAdapter(CourtAdapter):
 
         return record
 
+    # ------------------------------------------------------------------
+    # Appearances
+    # ------------------------------------------------------------------
+
     async def get_appearances(
         self, index_number: str, court_type: str, county: str
     ) -> list[AppearanceRecord]:
-        """Fetch all scheduled appearances for a case from NY WebCivil."""
+        """Fetch all scheduled appearances for a case."""
         engine = self._get_engine()
 
         params = SearchParams(
@@ -699,10 +957,17 @@ class NYWebCivilAdapter(CourtAdapter):
         if not detail_url:
             return []
 
+        base = self._base_url_for_detail(detail_url)
         if not detail_url.startswith("http"):
-            detail_url = f"{BASE_URL}/{detail_url}"
+            detail_url = f"{base}/{detail_url}"
 
         detail_result = await engine.get(detail_url)
+
+        # Fallback to browser if httpx is blocked
+        if not detail_result.success and self._should_fallback(detail_result):
+            browser = self._get_browser_engine()
+            detail_result = await browser.get(detail_url)
+
         if not detail_result.success or not detail_result.soup:
             return []
 
@@ -739,20 +1004,17 @@ class NYWebCivilAdapter(CourtAdapter):
         )
         return appearances
 
+    # ------------------------------------------------------------------
+    # Attorney search
+    # ------------------------------------------------------------------
+
     async def search_by_attorney(
         self, attorney_name: str, attorney_reg_number: Optional[str] = None, county: Optional[str] = None
     ) -> list[CourtRecord]:
-        """
-        Search NY WebCivil for cases associated with an attorney.
-
-        WebCivil supports searching by attorney/firm name as a party name search.
-        We search both plaintiff and defendant fields with the attorney name
-        to find cases where the attorney's firm appears.
-        """
+        """Search NY WebCivil for cases associated with an attorney."""
         engine = self._get_engine()
         all_records: list[CourtRecord] = []
 
-        # Search by attorney name as plaintiff firm
         params_plaintiff = SearchParams(
             plaintiff=attorney_name,
             county=county,
@@ -760,14 +1022,12 @@ class NYWebCivilAdapter(CourtAdapter):
         results_p = await self._search_by_party(engine, params_plaintiff)
         all_records.extend(results_p)
 
-        # Also search by attorney name as defendant
         params_defendant = SearchParams(
             defendant=attorney_name,
             county=county,
         )
         results_d = await self._search_by_party(engine, params_defendant)
 
-        # Deduplicate by index_number
         seen = {r.index_number for r in all_records}
         for r in results_d:
             if r.index_number not in seen:
@@ -780,7 +1040,11 @@ class NYWebCivilAdapter(CourtAdapter):
         )
         return all_records
 
+    # ------------------------------------------------------------------
+    # Health check
+    # ------------------------------------------------------------------
+
     async def health_check(self) -> bool:
         """Check if NY WebCivil is accessible."""
         engine = self._get_engine()
-        return await engine.health_check(f"{BASE_URL}/FCASMain")
+        return await engine.health_check(f"{BASE_URL_SUPREME}/FCASMain")
