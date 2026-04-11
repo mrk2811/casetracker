@@ -68,6 +68,22 @@ def find_matching_case(
             params.append(county)
 
         row = conn.execute(query, params).fetchone()
+        if row:
+            return dict(row)
+
+        # Try case-insensitive match (e.g. cv-2026-00891 vs CV-2026-00891)
+        query = "SELECT * FROM cases WHERE user_id = ? AND LOWER(index_number) = LOWER(?)"
+        params = [user_id, index_number]
+        row = conn.execute(query, params).fetchone()
+        if row:
+            return dict(row)
+
+        # Try matching with stripped hyphens/slashes for flexible formats
+        # e.g., "CV-2026-00891" could be stored as "CV202600891" or vice versa
+        stripped = index_number.replace("-", "").replace("/", "")
+        query = "SELECT * FROM cases WHERE user_id = ? AND REPLACE(REPLACE(index_number, '-', ''), '/', '') = ?"
+        params = [user_id, stripped]
+        row = conn.execute(query, params).fetchone()
         return dict(row) if row else None
 
 
