@@ -9,6 +9,7 @@ Dedup key: (case_number, court, county, event_date, event_type)
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -235,17 +236,24 @@ def process_email_events(
         )
 
         if not case:
-            results.append({
-                "action": "no_match",
-                "index_number": event.index_number,
-                "event_type": event.event_type,
-                "details": f"No tracked case found for index {event.index_number}",
-            })
+            if not event.index_number:
+                results.append({
+                    "action": "no_match",
+                    "index_number": event.index_number,
+                    "event_type": event.event_type,
+                    "details": "No index number extracted, cannot create case",
+                })
+                logger.info(
+                    f"No index number in event for user {user_id}, skipping"
+                )
+                continue
+
+            # Auto-create case from email data
+            case = _create_case_from_email(user_id, event, source)
             logger.info(
-                f"No matching case for user {user_id}, "
+                f"Auto-created case {case['id']} for user {user_id}, "
                 f"index {event.index_number}"
             )
-            continue
 
         # Reconcile the event
         reconcile_result = reconcile_event(case["id"], event, source)
@@ -264,6 +272,64 @@ def process_email_events(
             _create_notification(user_id, case["id"], event)
 
     return results
+
+
+def _create_case_from_email(
+    user_id: int,
+    event: ParsedEmailEvent,
+    source: str = "etrack_email",
+) -> dict:
+    """
+    Auto-create a new case from an inbound email event.
+
+    When an email contains a case number that doesn't exist in the
+    user's tracked cases, we create it automatically so the user
+    doesn't have to add every case manually.
+
+    Uses whatever metadata is available from the parsed email event;
+    defaults are applied for required fields that aren't present.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    court_type = event.court_type or "supreme"
+    county = event.county or "Unknown"
+
+    # Try to extract case year from the index number
+    case_year = None
+    if event.index_number:
+        # Match year in formats like CV-2026-00891 or 152847/2026
+        year_match = re.search(r"(?:-(\d{4})-|/(\d{4})$)", event.index_number)
+        if year_match:
+            case_year = int(year_match.group(1) or year_match.group(2))
+
+    with get_db() as conn:
+        cursor = conn.execute(
+            """INSERT INTO cases
+               (user_id, court_type, county, index_number, case_year,
+                case_status, plaintiff, defendant, justice, notes,
+                source, last_checked_at, last_source, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                user_id,
+                court_type,
+                county,
+                event.index_number,
+                case_year,
+                None,  # plaintiff
+                None,  # defendant
+                event.justice,
+                f"Auto-created from email: {event.description or ''}",
+                source,
+                now,
+                source,
+                now,
+                now,
+            ),
+        )
+        case_id = cursor.lastrowid
+
+        row = conn.execute("SELECT * FROM cases WHERE id = ?", (case_id,)).fetchone()
+        return dict(row)
 
 
 def _upsert_appearance(case_id: int, event: ParsedEmailEvent, source: str) -> None:
