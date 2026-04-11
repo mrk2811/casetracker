@@ -27,8 +27,11 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://iapps.courts.state.ny.us/webcivil"
 
-# URL of the WebCivil search form page (used by the browser fallback)
-SEARCH_FORM_URL = f"{BASE_URL}/FCASMain"
+# URL of the WebCivil search form pages (used by the browser fallback)
+# The actual search form (with input fields) lives at FCASSearch?param=<type>,
+# NOT at FCASMain which is just the landing/welcome page.
+INDEX_SEARCH_FORM_URL = f"{BASE_URL}/FCASSearch?param=I"
+PARTY_SEARCH_FORM_URL = f"{BASE_URL}/FCASSearch?param=P"
 
 # Mapping of county names to court select values used by WebCivil
 COUNTY_COURT_VALUES: dict[str, dict[str, str]] = {
@@ -438,7 +441,14 @@ class NYWebCivilAdapter(CourtAdapter):
         params: SearchParams,
         form_data: dict[str, str],
     ) -> "ScrapeResult":
-        """Perform an index-number search using the curl_cffi browser fallback."""
+        """Perform an index-number search using the curl_cffi browser fallback.
+
+        The WebCivil search requires:
+        1. GET the search form page (FCASSearch?param=I) to establish a
+           server-side session (JSESSIONID cookie).  The landing page
+           (FCASMain) does NOT set up the session correctly.
+        2. POST the form data including hidden fields that the server expects.
+        """
         from app.scraper.engine import ScrapeResult  # local to avoid circular at module level
 
         browser = self._get_browser_engine()
@@ -450,12 +460,34 @@ class NYWebCivilAdapter(CourtAdapter):
         )
 
         try:
-            # First GET the search page to establish cookies/session
-            await browser.get(SEARCH_FORM_URL)
+            # GET the *search form* page (not the landing page) to
+            # establish a proper server-side session with JSESSIONID.
+            form_page = await browser.get(INDEX_SEARCH_FORM_URL)
+            if not form_page.success:
+                logger.warning(
+                    "Browser fallback: could not load index search form (HTTP %s)",
+                    form_page.status_code,
+                )
+                return form_page
 
-            # Then POST the form data directly
+            # Build POST payload with all hidden fields the form expects
+            post_data: dict[str, str] = {
+                "hWhichPage": "I",
+                "hCourtType": "Supreme",
+                "hPageNumber": "1",
+                "hSearchKey": "",
+                "rbStatus": "open",
+                "rbFutureCases": "N",
+                "rbOutputFormat": "HTML",
+                "cboSort": "index_number",
+                "cboYearOfFiling": "0",
+                "btnFindCase": "Find Case(s)",
+            }
+            # Overlay the caller-supplied fields (txtIndex, cboCourt, etc.)
+            post_data.update(form_data)
+
             search_url = f"{BASE_URL}/FCASSearch"
-            result = await browser.post_form(url=search_url, data=form_data)
+            result = await browser.post_form(url=search_url, data=post_data)
             return result
         except Exception as exc:
             logger.error("Browser fallback failed for index search: %s", exc)
@@ -528,12 +560,32 @@ class NYWebCivilAdapter(CourtAdapter):
         )
 
         try:
-            # First GET the search page to establish cookies/session
-            await browser.get(SEARCH_FORM_URL)
+            # GET the *party search form* page to establish session
+            form_page = await browser.get(PARTY_SEARCH_FORM_URL)
+            if not form_page.success:
+                logger.warning(
+                    "Browser fallback: could not load party search form (HTTP %s)",
+                    form_page.status_code,
+                )
+                return form_page
 
-            # Then POST the form data directly
+            # Build POST payload with all hidden fields
+            post_data: dict[str, str] = {
+                "hWhichPage": "P",
+                "hCourtType": "Supreme",
+                "hPageNumber": "1",
+                "hSearchKey": "",
+                "rbStatus": "open",
+                "rbFutureCases": "N",
+                "rbOutputFormat": "HTML",
+                "cboSort": "index_number",
+                "cboYearOfFiling": "0",
+                "btnFindCase": "Find Case(s)",
+            }
+            post_data.update(form_data)
+
             search_url = f"{BASE_URL}/FCASSearch"
-            result = await browser.post_form(url=search_url, data=form_data)
+            result = await browser.post_form(url=search_url, data=post_data)
             return result
         except Exception as exc:
             logger.error("Browser fallback failed for party search: %s", exc)

@@ -44,45 +44,70 @@ class BrowserEngine:
             self._session = cffi_requests.Session(impersonate="chrome")
         return self._session
 
-    async def get(self, url: str) -> ScrapeResult:
-        """Perform a GET request using the impersonating session."""
-        start_time = time.monotonic()
-        try:
-            session = self._get_session()
-            response = await asyncio.to_thread(
-                session.get,
-                url,
-                headers={"User-Agent": random.choice(USER_AGENTS)},
-                timeout=30,
-            )
-            elapsed_ms = (time.monotonic() - start_time) * 1000
-            html = response.text
+    async def get(
+        self, url: str, *, retries: int = 3
+    ) -> ScrapeResult:
+        """Perform a GET request, retrying on Cloudflare 403s.
 
-            if response.status_code != 200:
-                return ScrapeResult(
+        Cloudflare's managed challenge is inconsistent — the same URL may
+        return 403 on one attempt and 200 on the next.  We retry up to
+        *retries* times with a fresh session each attempt.
+        """
+        last_result: Optional[ScrapeResult] = None
+        for attempt in range(1, retries + 1):
+            start_time = time.monotonic()
+            try:
+                session = self._get_session()
+                response = await asyncio.to_thread(
+                    session.get,
+                    url,
+                    headers={"User-Agent": random.choice(USER_AGENTS)},
+                    timeout=30,
+                )
+                elapsed_ms = (time.monotonic() - start_time) * 1000
+                html = response.text
+
+                if response.status_code == 200 and "just a moment" not in html[:500].lower():
+                    soup = BeautifulSoup(html, "lxml")
+                    return ScrapeResult(
+                        success=True,
+                        html=html,
+                        soup=soup,
+                        status_code=response.status_code,
+                        response_time_ms=elapsed_ms,
+                    )
+
+                # Cloudflare blocked — reset session and retry
+                logger.info(
+                    "Browser GET attempt %d/%d blocked (HTTP %d) for %s",
+                    attempt, retries, response.status_code, url,
+                )
+                last_result = ScrapeResult(
                     success=False,
                     html=html,
                     status_code=response.status_code,
                     error_message=f"HTTP {response.status_code}",
                     response_time_ms=elapsed_ms,
                 )
+                # Reset session to get fresh TLS fingerprint / cookies
+                self.close()
+                await asyncio.sleep(random.uniform(0.5, 1.5))
 
-            soup = BeautifulSoup(html, "lxml")
-            return ScrapeResult(
-                success=True,
-                html=html,
-                soup=soup,
-                status_code=response.status_code,
-                response_time_ms=elapsed_ms,
-            )
-        except Exception as exc:
-            elapsed_ms = (time.monotonic() - start_time) * 1000
-            logger.error("Browser GET failed for %s: %s", url, exc)
-            return ScrapeResult(
-                success=False,
-                error_message=f"Browser fallback error: {exc}",
-                response_time_ms=elapsed_ms,
-            )
+            except Exception as exc:
+                elapsed_ms = (time.monotonic() - start_time) * 1000
+                logger.error("Browser GET attempt %d failed for %s: %s", attempt, url, exc)
+                last_result = ScrapeResult(
+                    success=False,
+                    error_message=f"Browser fallback error: {exc}",
+                    response_time_ms=elapsed_ms,
+                )
+                self.close()
+                await asyncio.sleep(random.uniform(0.5, 1.5))
+
+        return last_result or ScrapeResult(
+            success=False,
+            error_message="All browser GET retries exhausted",
+        )
 
     async def post_form(
         self,
