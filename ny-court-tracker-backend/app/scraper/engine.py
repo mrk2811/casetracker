@@ -60,6 +60,17 @@ CAPTCHA_INDICATORS = [
     "too many requests",
 ]
 
+# Cloudflare-specific challenge indicators
+CLOUDFLARE_INDICATORS = [
+    "_cf_chl_opt",
+    "cf-browser-verification",
+    "challenge-platform",
+    "just a moment",
+    "enable javascript and cookies to continue",
+    "cf-challenge",
+    "cf_chl_managed",
+]
+
 
 @dataclass
 class ScrapeResult:
@@ -70,6 +81,7 @@ class ScrapeResult:
     status_code: Optional[int] = None
     error_message: Optional[str] = None
     captcha_detected: bool = False
+    cloudflare_detected: bool = False
     response_time_ms: float = 0.0
 
 
@@ -161,6 +173,18 @@ class ScraperEngine:
                 return True
         return False
 
+    def _detect_cloudflare(self, html: str) -> bool:
+        """Check if the response contains Cloudflare challenge indicators."""
+        html_lower = html.lower()
+        for indicator in CLOUDFLARE_INDICATORS:
+            if indicator.lower() in html_lower:
+                logger.warning(
+                    "Cloudflare challenge detected: found '%s' in response",
+                    indicator,
+                )
+                return True
+        return False
+
     async def get(self, url: str, params: Optional[dict] = None) -> ScrapeResult:
         """
         Perform a GET request with rate limiting and CAPTCHA detection.
@@ -198,13 +222,31 @@ class ScraperEngine:
                     response_time_ms=elapsed_ms,
                 )
 
-            # Check for non-200 status
-            if response.status_code != 200:
+            # Check for Cloudflare challenge
+            is_cloudflare = self._detect_cloudflare(html)
+            if is_cloudflare:
                 self._consecutive_errors += 1
                 return ScrapeResult(
                     success=False,
                     html=html,
                     status_code=response.status_code,
+                    captcha_detected=True,
+                    cloudflare_detected=True,
+                    error_message="Cloudflare challenge detected",
+                    response_time_ms=elapsed_ms,
+                )
+
+            # Check for non-200 status
+            if response.status_code != 200:
+                self._consecutive_errors += 1
+                # Also check if the error page is a Cloudflare challenge
+                cf_blocked = self._detect_cloudflare(html)
+                return ScrapeResult(
+                    success=False,
+                    html=html,
+                    status_code=response.status_code,
+                    captcha_detected=cf_blocked,
+                    cloudflare_detected=cf_blocked,
                     error_message=f"HTTP {response.status_code}",
                     response_time_ms=elapsed_ms,
                 )
@@ -274,12 +316,29 @@ class ScraperEngine:
                     response_time_ms=elapsed_ms,
                 )
 
-            if response.status_code != 200:
+            # Check for Cloudflare challenge
+            is_cloudflare = self._detect_cloudflare(html)
+            if is_cloudflare:
                 self._consecutive_errors += 1
                 return ScrapeResult(
                     success=False,
                     html=html,
                     status_code=response.status_code,
+                    captcha_detected=True,
+                    cloudflare_detected=True,
+                    error_message="Cloudflare challenge detected",
+                    response_time_ms=elapsed_ms,
+                )
+
+            if response.status_code != 200:
+                self._consecutive_errors += 1
+                cf_blocked = self._detect_cloudflare(html)
+                return ScrapeResult(
+                    success=False,
+                    html=html,
+                    status_code=response.status_code,
+                    captcha_detected=cf_blocked,
+                    cloudflare_detected=cf_blocked,
                     error_message=f"HTTP {response.status_code}",
                     response_time_ms=elapsed_ms,
                 )

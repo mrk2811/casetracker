@@ -21,10 +21,14 @@ from app.adapters.base import (
     CourtSystem,
 )
 from app.scraper.engine import ScraperEngine
+from app.scraper.browser_engine import BrowserEngine
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://iapps.courts.state.ny.us/webcivil"
+
+# URL of the WebCivil search form page (used by the browser fallback)
+SEARCH_FORM_URL = f"{BASE_URL}/FCASMain"
 
 # Mapping of county names to court select values used by WebCivil
 COUNTY_COURT_VALUES: dict[str, dict[str, str]] = {
@@ -329,15 +333,38 @@ class NYWebCivilAdapter(CourtAdapter):
     Adapter for NY WebCivil (Supreme & Civil Courts).
     Covers Supreme Court, Civil Court, and Housing Court cases.
     Base URL: https://iapps.courts.state.ny.us/webcivil
+
+    Uses a two-tier scraping strategy:
+    1. Primary: fast httpx-based requests via ScraperEngine
+    2. Fallback: headless Selenium browser via BrowserEngine when the
+       primary request fails (e.g. Cloudflare JS challenge, CAPTCHA, HTTP 403)
     """
 
     def __init__(self) -> None:
         self._engine: Optional[ScraperEngine] = None
+        self._browser_engine: Optional[BrowserEngine] = None
 
     def _get_engine(self) -> ScraperEngine:
         if self._engine is None:
             self._engine = ScraperEngine()
         return self._engine
+
+    def _get_browser_engine(self) -> BrowserEngine:
+        """Lazily create the headless browser engine for fallback scraping."""
+        if self._browser_engine is None:
+            self._browser_engine = BrowserEngine()
+        return self._browser_engine
+
+    def _should_fallback(self, result: "ScrapeResult") -> bool:
+        """Decide whether to retry the request with the headless browser."""
+        if result.success:
+            return False
+        # Retry on Cloudflare challenge, CAPTCHA, or HTTP 403
+        if result.cloudflare_detected or result.captcha_detected:
+            return True
+        if result.status_code == 403:
+            return True
+        return False
 
     @property
     def court_system(self) -> CourtSystem:
@@ -366,7 +393,7 @@ class NYWebCivilAdapter(CourtAdapter):
     async def _search_by_index(
         self, engine: ScraperEngine, params: SearchParams
     ) -> list[CourtRecord]:
-        """Search by index number."""
+        """Search by index number, falling back to headless browser on failure."""
         search_url = f"{BASE_URL}/FCASSearch"
 
         form_data: dict[str, str] = {
@@ -376,10 +403,12 @@ class NYWebCivilAdapter(CourtAdapter):
             "param": "I",
         }
 
+        select_fields: dict[str, str] = {}
         if params.county:
             court_value = _get_court_value(params.county)
             if court_value:
                 form_data["cboCourt"] = court_value
+                select_fields["cboCourt"] = court_value
 
         logger.info(
             "Searching NYWebCivil by index: %s (county: %s)",
@@ -390,19 +419,62 @@ class NYWebCivilAdapter(CourtAdapter):
         result = await engine.post(search_url, data=form_data)
 
         if not result.success:
-            if result.captcha_detected:
-                logger.warning("CAPTCHA blocked NYWebCivil index search")
-            return []
+            if self._should_fallback(result):
+                logger.info(
+                    "httpx request failed (%s), retrying with headless browser",
+                    result.error_message,
+                )
+                result = await self._browser_search_by_index(params, select_fields)
+            else:
+                if result.captcha_detected:
+                    logger.warning("CAPTCHA blocked NYWebCivil index search")
+                return []
 
-        if not result.soup:
+        if not result.success or not result.soup:
             return []
 
         return self._parse_search_results(result.soup, params)
 
+    async def _browser_search_by_index(
+        self,
+        params: SearchParams,
+        select_fields: dict[str, str],
+    ) -> "ScrapeResult":
+        """Perform an index-number search using the headless browser fallback."""
+        from app.scraper.engine import ScrapeResult  # local to avoid circular at module level
+
+        browser = self._get_browser_engine()
+
+        # Text fields that the browser will type into
+        text_fields: dict[str, str] = {
+            "txtIndex": params.index_number or "",
+        }
+
+        logger.info(
+            "Browser fallback: searching by index %s (county: %s)",
+            params.index_number,
+            params.county,
+        )
+
+        try:
+            result = await browser.post_form(
+                page_url=SEARCH_FORM_URL,
+                form_fields=text_fields,
+                select_fields=select_fields,
+                submit_selector="input[type='submit'][value='Search']",
+            )
+            return result
+        except Exception as exc:
+            logger.error("Browser fallback failed for index search: %s", exc)
+            return ScrapeResult(
+                success=False,
+                error_message=f"Browser fallback error: {exc}",
+            )
+
     async def _search_by_party(
         self, engine: ScraperEngine, params: SearchParams
     ) -> list[CourtRecord]:
-        """Search by party name."""
+        """Search by party name, falling back to headless browser on failure."""
         search_url = f"{BASE_URL}/FCASSearch"
 
         form_data: dict[str, str] = {
@@ -411,6 +483,7 @@ class NYWebCivilAdapter(CourtAdapter):
             "param": "P",
         }
 
+        select_fields: dict[str, str] = {}
         if params.plaintiff:
             form_data["txtPlaintiff"] = params.plaintiff
         if params.defendant:
@@ -420,6 +493,7 @@ class NYWebCivilAdapter(CourtAdapter):
             court_value = _get_court_value(params.county)
             if court_value:
                 form_data["cboCourt"] = court_value
+                select_fields["cboCourt"] = court_value
 
         logger.info(
             "Searching NYWebCivil by party: plaintiff=%s defendant=%s",
@@ -430,14 +504,58 @@ class NYWebCivilAdapter(CourtAdapter):
         result = await engine.post(search_url, data=form_data)
 
         if not result.success:
-            if result.captcha_detected:
-                logger.warning("CAPTCHA blocked NYWebCivil party search")
-            return []
+            if self._should_fallback(result):
+                logger.info(
+                    "httpx request failed (%s), retrying party search with headless browser",
+                    result.error_message,
+                )
+                result = await self._browser_search_by_party(params, select_fields)
+            else:
+                if result.captcha_detected:
+                    logger.warning("CAPTCHA blocked NYWebCivil party search")
+                return []
 
-        if not result.soup:
+        if not result.success or not result.soup:
             return []
 
         return self._parse_search_results(result.soup, params)
+
+    async def _browser_search_by_party(
+        self,
+        params: SearchParams,
+        select_fields: dict[str, str],
+    ) -> "ScrapeResult":
+        """Perform a party-name search using the headless browser fallback."""
+        from app.scraper.engine import ScrapeResult
+
+        browser = self._get_browser_engine()
+
+        text_fields: dict[str, str] = {}
+        if params.plaintiff:
+            text_fields["txtPlaintiff"] = params.plaintiff
+        if params.defendant:
+            text_fields["txtDefendant"] = params.defendant
+
+        logger.info(
+            "Browser fallback: searching by party plaintiff=%s defendant=%s",
+            params.plaintiff,
+            params.defendant,
+        )
+
+        try:
+            result = await browser.post_form(
+                page_url=SEARCH_FORM_URL,
+                form_fields=text_fields,
+                select_fields=select_fields,
+                submit_selector="input[type='submit'][value='Search']",
+            )
+            return result
+        except Exception as exc:
+            logger.error("Browser fallback failed for party search: %s", exc)
+            return ScrapeResult(
+                success=False,
+                error_message=f"Browser fallback error: {exc}",
+            )
 
     def _parse_search_results(
         self, soup: BeautifulSoup, params: SearchParams
