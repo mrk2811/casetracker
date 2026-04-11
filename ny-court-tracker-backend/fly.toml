@@ -3,10 +3,6 @@ primary_region = "ewr"
 
 [build]
 
-[env]
-  CHROME_BIN = "/usr/bin/chromium"
-  CHROMEDRIVER_PATH = "/usr/bin/chromedriver"
-
 [http_service]
   internal_port = 8000
   force_https = true
