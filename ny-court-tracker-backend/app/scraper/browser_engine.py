@@ -8,6 +8,7 @@ Runs Chrome in headless mode with stealth-oriented options.
 
 import asyncio
 import logging
+import os
 import random
 import time
 from typing import Optional
@@ -39,6 +40,11 @@ def _build_chrome_options() -> Options:
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_argument("--window-size=1920,1080")
 
+    # Use CHROME_BIN env var if set (e.g. in Docker: /usr/bin/chromium)
+    chrome_bin = os.environ.get("CHROME_BIN")
+    if chrome_bin:
+        options.binary_location = chrome_bin
+
     ua = random.choice(USER_AGENTS)
     options.add_argument(f"--user-agent={ua}")
 
@@ -52,7 +58,11 @@ def _build_chrome_options() -> Options:
 def _create_driver() -> webdriver.Chrome:
     """Create a headless Chrome WebDriver instance."""
     options = _build_chrome_options()
-    service = Service()
+
+    # Use CHROMEDRIVER_PATH env var if set (e.g. in Docker: /usr/bin/chromedriver)
+    chromedriver_path = os.environ.get("CHROMEDRIVER_PATH")
+    service = Service(executable_path=chromedriver_path) if chromedriver_path else Service()
+
     driver = webdriver.Chrome(service=service, options=options)
     # Remove webdriver flag to reduce detection
     driver.execute_cdp_cmd(
