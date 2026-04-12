@@ -303,6 +303,15 @@ def _create_case_from_email(
             case_year = int(year_match.group(1) or year_match.group(2))
 
     with get_db() as conn:
+        # Guard against duplicates: another request may have created the
+        # same case between our find_matching_case check and now.
+        existing = conn.execute(
+            "SELECT * FROM cases WHERE user_id = ? AND index_number = ?",
+            (user_id, event.index_number),
+        ).fetchone()
+        if existing:
+            return dict(existing)
+
         cursor = conn.execute(
             """INSERT INTO cases
                (user_id, court_type, county, index_number, case_year,

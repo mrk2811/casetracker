@@ -256,12 +256,15 @@ def process_mailgun_webhook(form_data: dict) -> dict:
     We normalize the Mailgun fields to match our internal format
     and reuse the same processing pipeline.
     """
+    # Prefer stripped-text/stripped-html (Mailgun removes quoted thread
+    # content and signatures) so the parser only sees the new message.
+    # Fall back to body-plain/body-html when stripped versions are empty.
     normalized = {
         "to": form_data.get("recipient", ""),
         "from": form_data.get("sender", form_data.get("from", "")),
         "subject": form_data.get("subject", ""),
-        "text": form_data.get("body-plain", ""),
-        "html": form_data.get("body-html", ""),
+        "text": form_data.get("stripped-text", "") or form_data.get("body-plain", ""),
+        "html": form_data.get("stripped-html", "") or form_data.get("body-html", ""),
     }
     return process_sendgrid_webhook(normalized)
 
