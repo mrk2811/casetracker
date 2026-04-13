@@ -474,20 +474,22 @@ export default function CaseDetailScreen({ route, navigation }: any) {
         ) : (
           appearances.map((app) => {
             const isPast = new Date(app.appearance_date + "T23:59:59") < new Date();
+            const isRescheduled = app.status === "rescheduled";
+            const isDimmed = isPast || isRescheduled;
             return (
               <View
                 key={app.id}
-                style={[styles.appearanceItem, isPast && styles.pastAppearance]}
+                style={[styles.appearanceItem, isDimmed && styles.pastAppearance]}
               >
                 <View style={styles.appLeft}>
                   <View style={styles.appDateRow}>
                     <Ionicons
                       name="calendar"
                       size={16}
-                      color={isPast ? "#9ca3af" : "#18181b"}
+                      color={isDimmed ? "#9ca3af" : "#18181b"}
                     />
                     <Text
-                      style={[styles.appDate, isPast && styles.pastText]}
+                      style={[styles.appDate, isDimmed && styles.pastText]}
                     >
                       {new Date(app.appearance_date + "T00:00:00").toLocaleDateString("en-US", {
                         weekday: "short",
@@ -496,7 +498,12 @@ export default function CaseDetailScreen({ route, navigation }: any) {
                         year: "numeric",
                       })}
                     </Text>
-                    {isPast && (
+                    {isRescheduled && (
+                      <View style={styles.rescheduledBadge}>
+                        <Text style={styles.rescheduledBadgeText}>Rescheduled</Text>
+                      </View>
+                    )}
+                    {isPast && !isRescheduled && (
                       <View style={styles.pastBadge}>
                         <Text style={styles.pastBadgeText}>Past</Text>
                       </View>
@@ -729,6 +736,8 @@ const styles = StyleSheet.create({
   pastText: { color: "#9ca3af" },
   pastBadge: { backgroundColor: "#f3f4f6", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   pastBadgeText: { fontSize: 10, color: "#9ca3af" },
+  rescheduledBadge: { backgroundColor: "#fef3c7", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  rescheduledBadgeText: { fontSize: 10, fontWeight: "600", color: "#d97706" },
   appDetails: { marginTop: 6, gap: 2 },
   detailRow: { flexDirection: "row", alignItems: "center", gap: 4 },
   detailText: { fontSize: 13, color: "#6b7280" },

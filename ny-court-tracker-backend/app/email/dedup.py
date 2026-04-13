@@ -342,7 +342,14 @@ def _create_case_from_email(
 
 
 def _upsert_appearance(case_id: int, event: ParsedEmailEvent, source: str) -> None:
-    """Create or update an appearance from an email event."""
+    """Create or update an appearance from an email event.
+
+    When a brand-new future appearance is created, any other *future*
+    appearances that were previously ``scheduled`` for the same case are
+    automatically marked ``rescheduled``.  This keeps the Dashboard /
+    Calendar clean (only the latest scheduled date shows) while
+    preserving the full history in the case-detail view.
+    """
     with get_db() as conn:
         # Check if appearance already exists for this date
         existing = conn.execute(
@@ -355,7 +362,7 @@ def _upsert_appearance(case_id: int, event: ParsedEmailEvent, source: str) -> No
 
         if existing:
             # Update existing appearance with email data (email wins)
-            updates = {"source": source, "updated_at": now}
+            updates = {"source": source, "updated_at": now, "status": "scheduled"}
             if event.event_time:
                 updates["appearance_time"] = event.event_time
             if event.location:
@@ -371,12 +378,27 @@ def _upsert_appearance(case_id: int, event: ParsedEmailEvent, source: str) -> No
             )
             logger.info(f"Updated appearance {existing['id']} from email")
         else:
+            # Mark older future appearances for this case as rescheduled
+            rescheduled = conn.execute(
+                """UPDATE appearances
+                   SET status = 'rescheduled', updated_at = ?
+                   WHERE case_id = ?
+                     AND appearance_date >= date('now')
+                     AND status = 'scheduled'""",
+                (now, case_id),
+            ).rowcount
+            if rescheduled:
+                logger.info(
+                    f"Marked {rescheduled} prior appearance(s) as rescheduled "
+                    f"for case {case_id}"
+                )
+
             # Create new appearance
             conn.execute(
                 """INSERT INTO appearances 
                    (case_id, appearance_date, appearance_time, appearance_type,
-                    location, notes, source, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    location, notes, status, source, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?)""",
                 (
                     case_id,
                     event.event_date,

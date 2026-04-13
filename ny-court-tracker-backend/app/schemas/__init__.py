@@ -208,6 +208,7 @@ class AppearanceOut(BaseModel):
     appearance_type: Optional[str] = None
     location: Optional[str] = None
     notes: Optional[str] = None
+    status: str = "scheduled"
     source: str = "manual"
     created_at: str
     updated_at: str

@@ -90,7 +90,8 @@ async def list_cases(
         query = """
             SELECT c.*,
                    (SELECT MIN(a.appearance_date) FROM appearances a
-                    WHERE a.case_id = c.id AND a.appearance_date >= date('now')) as next_appearance
+                    WHERE a.case_id = c.id AND a.appearance_date >= date('now')
+                      AND COALESCE(a.status, 'scheduled') != 'rescheduled') as next_appearance
             FROM cases c WHERE c.user_id = ?
         """
         params: list = [user_id]
@@ -251,7 +252,7 @@ async def get_case(case_id: int, user_id: int = Depends(get_current_user_id)):
 
     with get_db() as conn:
         next_app = conn.execute(
-            "SELECT MIN(appearance_date) as next_date FROM appearances WHERE case_id = ? AND appearance_date >= date('now')",
+            "SELECT MIN(appearance_date) as next_date FROM appearances WHERE case_id = ? AND appearance_date >= date('now') AND COALESCE(status, 'scheduled') != 'rescheduled'",
             (case_id,),
         ).fetchone()
 
