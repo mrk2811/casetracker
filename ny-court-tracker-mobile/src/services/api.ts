@@ -111,6 +111,8 @@ export interface CaseSearchResponse {
   results: CaseSearchResult[];
   court_system: string;
   message: string;
+  captcha_required?: boolean;
+  captcha_sitekey?: string;
 }
 
 export interface CourtConfig {
@@ -210,6 +212,7 @@ export const casesApi = {
     court_type: string;
     county: string;
     court_system?: string;
+    captcha_token?: string;
   }) => api.post<CaseSearchResponse>("/api/cases/search", data),
   verify: (data: Partial<Case> & { court_system?: string; search_params?: string }) =>
     api.post<Case>("/api/cases/verify", data),

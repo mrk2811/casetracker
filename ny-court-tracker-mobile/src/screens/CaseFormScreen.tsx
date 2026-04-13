@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { casesApi, CaseSearchResult } from "../services/api";
+import HCaptchaWeb from "../components/HCaptchaWeb";
 
 const COURT_TYPES = [
   { value: "supreme", label: "Civil Supreme Court" },
@@ -79,6 +80,10 @@ export default function CaseFormScreen({ route, navigation }: any) {
   const [showVerification, setShowVerification] = useState(false);
   const [selectedResult, setSelectedResult] = useState<CaseSearchResult | null>(null);
 
+  // hCaptcha flow state
+  const [captchaSitekey, setCaptchaSitekey] = useState<string | null>(null);
+  const [showCaptcha, setShowCaptcha] = useState(false);
+
   useEffect(() => {
     if (isEditing) {
       setLoading(true);
@@ -111,7 +116,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSearch = async () => {
+  const handleSearch = async (captchaToken?: string) => {
     if (!form.index_number || !form.county) {
       Alert.alert("Required Fields", "Please enter an Index Number and select a County before searching.");
       return;
@@ -120,6 +125,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
     setSearchResults([]);
     setSearchMessage(null);
     setSelectedResult(null);
+    setShowCaptcha(false);
     try {
       const courtSystem = getCourtSystem(form.court_type);
       const res = await casesApi.search({
@@ -127,7 +133,17 @@ export default function CaseFormScreen({ route, navigation }: any) {
         court_type: form.court_type,
         county: form.county,
         court_system: courtSystem,
+        captcha_token: captchaToken,
       });
+
+      // Check if backend is requesting captcha verification
+      if (res.data.captcha_required && res.data.captcha_sitekey) {
+        setCaptchaSitekey(res.data.captcha_sitekey);
+        setShowCaptcha(true);
+        setSearchMessage(res.data.message);
+        return;
+      }
+
       setSearchResults(res.data.results);
       setSearchMessage(res.data.message);
       setShowVerification(true);
@@ -137,6 +153,17 @@ export default function CaseFormScreen({ route, navigation }: any) {
     } finally {
       setSearching(false);
     }
+  };
+
+  const handleCaptchaVerify = (token: string) => {
+    // User solved the captcha — retry search with the token
+    handleSearch(token);
+  };
+
+  const handleCaptchaError = () => {
+    setShowCaptcha(false);
+    setCaptchaSitekey(null);
+    Alert.alert("Captcha Error", "Failed to load verification. Please try again.");
   };
 
   const handleSelectResult = (result: CaseSearchResult) => {
@@ -492,7 +519,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
       {!isEditing && (
         <TouchableOpacity
           style={[styles.searchButton, searching && styles.buttonDisabled]}
-          onPress={handleSearch}
+          onPress={() => handleSearch()}
           disabled={searching}
         >
           {searching ? (
@@ -506,7 +533,35 @@ export default function CaseFormScreen({ route, navigation }: any) {
         </TouchableOpacity>
       )}
 
-      {!isEditing && (
+      {/* hCaptcha verification widget */}
+      {showCaptcha && captchaSitekey && (
+        <View style={styles.captchaContainer}>
+          <View style={styles.captchaHeader}>
+            <Ionicons name="shield-checkmark-outline" size={20} color="#f59e0b" />
+            <Text style={styles.captchaTitle}>Human Verification Required</Text>
+          </View>
+          <Text style={styles.captchaSubtitle}>
+            {searchMessage || "The court system requires verification. Please complete the challenge below."}
+          </Text>
+          <HCaptchaWeb
+            sitekey={captchaSitekey}
+            onVerify={handleCaptchaVerify}
+            onError={handleCaptchaError}
+            onExpire={() => {
+              setShowCaptcha(false);
+              setCaptchaSitekey(null);
+            }}
+          />
+          {searching && (
+            <View style={styles.captchaRetrying}>
+              <ActivityIndicator color="#18181b" size="small" />
+              <Text style={styles.captchaRetryingText}>Searching with verification...</Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {!isEditing && !showCaptcha && (
         <Text style={styles.searchHint}>
           Search the court system to verify and auto-fill case details, or fill in manually below.
         </Text>
@@ -889,4 +944,40 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   manualButtonText: { color: "#374151", fontSize: 15, fontWeight: "500" },
+  captchaContainer: {
+    backgroundColor: "#fffbeb",
+    borderWidth: 1,
+    borderColor: "#fcd34d",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+  },
+  captchaHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  captchaTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#92400e",
+  },
+  captchaSubtitle: {
+    fontSize: 13,
+    color: "#78716c",
+    marginBottom: 12,
+  },
+  captchaRetrying: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 12,
+  },
+  captchaRetryingText: {
+    fontSize: 13,
+    color: "#18181b",
+    fontWeight: "500",
+  },
 });

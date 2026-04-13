@@ -17,6 +17,7 @@ from typing import Optional
 from bs4 import BeautifulSoup
 
 from app.adapters.base import (
+    CaptchaRequiredError,
     CourtAdapter,
     CourtRecord,
     AppearanceRecord,
@@ -161,6 +162,37 @@ def _detect_captcha_intercept(html: str) -> bool:
         or ("hcaptcha" in lower and "terms of use" in lower)
         or ("i am human" in lower and ("hcaptcha" in lower or "h-captcha" in lower))
     )
+
+
+# Known hCaptcha sitekey used by webcivilLocal submit buttons
+_HCAPTCHA_SITEKEY = "6c824b97-caeb-4a2a-9144-db4f1c9f86d0"
+
+# Regex to extract hCaptcha sitekey from HTML
+_SITEKEY_RE = re.compile(r'data-sitekey=["\']([0-9a-f-]+)["\']')
+
+
+def _detect_hcaptcha_in_response(html: str) -> Optional[str]:
+    """Detect hCaptcha in a search response and return the sitekey if found.
+
+    The webcivilLocal form uses an invisible hCaptcha widget on the submit
+    button.  When curl_cffi POSTs without executing JS, the server returns
+    an HTML page containing hCaptcha elements instead of search results.
+
+    Returns the sitekey string if hCaptcha is detected, else None.
+    """
+    lower = html.lower()
+    if "h-captcha" not in lower and "hcaptcha" not in lower:
+        return None
+
+    m = _SITEKEY_RE.search(html)
+    if m:
+        return m.group(1)
+
+    # If we detect hCaptcha markers but can't extract sitekey, use the known one
+    if "h-captcha" in lower or "hcaptcha" in lower:
+        return _HCAPTCHA_SITEKEY
+
+    return None
 
 
 def _clean_text(text: Optional[str]) -> Optional[str]:
@@ -594,7 +626,16 @@ class NYWebCivilAdapter(CourtAdapter):
     async def _search_local_by_index(
         self, engine: ScraperEngine, params: SearchParams
     ) -> list[CourtRecord]:
-        """Search WebCivil Local by index number (e.g. LT-332489-24/BX)."""
+        """Search WebCivil Local by index number (e.g. LT-332489-24/BX).
+
+        If *params.captcha_token* is provided, it is included in the POST as
+        ``h-captcha-response`` and ``g-recaptcha-response`` fields so that
+        the server accepts the submission.
+
+        Raises :class:`CaptchaRequiredError` when hCaptcha blocks the search
+        and no token was supplied, allowing the router to ask the frontend
+        to present the hCaptcha widget to the user.
+        """
         parsed = _parse_local_index(params.index_number or "")
         if not parsed:
             logger.warning(
@@ -617,6 +658,14 @@ class NYWebCivilAdapter(CourtAdapter):
             "rbOutputFormat": "HTML",
             "btnFindCase": "Find Case(s)",
         }
+
+        # Include user-solved hCaptcha token when available
+        if params.captcha_token:
+            form_data["h-captcha-response"] = params.captcha_token
+            form_data["g-recaptcha-response"] = params.captcha_token
+            logger.info(
+                "Including user-provided hCaptcha token in Local search POST"
+            )
 
         logger.info(
             "Searching WebCivil Local by index: %s "
@@ -648,13 +697,33 @@ class NYWebCivilAdapter(CourtAdapter):
         if not result.success or not result.soup:
             return []
 
-        # Check for hCaptcha intercept
+        # Check for hCaptcha intercept (server-side "I am human" page)
         if result.html and _detect_captcha_intercept(result.html):
+            sitekey = _detect_hcaptcha_in_response(result.html) or _HCAPTCHA_SITEKEY
             logger.warning(
                 "WebCivil Local returned hCaptcha intercept page — "
-                "search blocked by IP reputation"
+                "raising CaptchaRequiredError (sitekey=%s)", sitekey
             )
-            return []
+            raise CaptchaRequiredError(sitekey=sitekey)
+
+        # Check for invisible hCaptcha in the response (form page returned
+        # instead of results because captcha token was missing/invalid)
+        if result.html:
+            sitekey = _detect_hcaptcha_in_response(result.html)
+            if sitekey and "LCCaseInfo" not in result.html:
+                # Response contains hCaptcha markers but no case result links,
+                # meaning the server rejected the submission.
+                if not params.captcha_token:
+                    logger.warning(
+                        "WebCivil Local response contains hCaptcha "
+                        "(no token provided) — raising CaptchaRequiredError"
+                    )
+                    raise CaptchaRequiredError(sitekey=sitekey)
+                else:
+                    logger.warning(
+                        "WebCivil Local response still contains hCaptcha "
+                        "despite token — token may be expired or invalid"
+                    )
 
         return self._parse_search_results(result.soup, params, is_local=True)
 
