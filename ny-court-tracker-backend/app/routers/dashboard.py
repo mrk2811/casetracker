@@ -94,6 +94,7 @@ async def get_dashboard(
             WHERE c.user_id = ?
               AND a.appearance_date >= date('now')
               AND a.appearance_date <= date('now', '+' || ? || ' days')
+              AND COALESCE(a.status, 'scheduled') != 'rescheduled'
         """
         params: list = [user_id, days_ahead]
 
@@ -164,6 +165,7 @@ async def get_calendar(
             WHERE c.user_id = ?
               AND a.appearance_date >= ?
               AND a.appearance_date < ?
+              AND COALESCE(a.status, 'scheduled') != 'rescheduled'
             ORDER BY a.appearance_date ASC, a.appearance_time ASC
         """
         rows = conn.execute(query, [user_id, start_date, end_date]).fetchall()

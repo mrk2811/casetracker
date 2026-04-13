@@ -66,6 +66,7 @@ export interface Appearance {
   appearance_type: string | null;
   location: string | null;
   notes: string | null;
+  status: "scheduled" | "rescheduled";
   created_at: string;
   updated_at: string;
 }

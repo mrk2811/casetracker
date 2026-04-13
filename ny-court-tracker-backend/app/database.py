@@ -81,6 +81,7 @@ def init_db():
                 appearance_type TEXT,
                 location TEXT,
                 notes TEXT,
+                status TEXT DEFAULT 'scheduled' CHECK(status IN ('scheduled', 'rescheduled')),
                 source TEXT DEFAULT 'manual',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -261,6 +262,8 @@ def init_db():
         app_cols = {row[1] for row in conn.execute("PRAGMA table_info(appearances)").fetchall()}
         if "source" not in app_cols:
             conn.execute("ALTER TABLE appearances ADD COLUMN source TEXT DEFAULT 'manual'")
+        if "status" not in app_cols:
+            conn.execute("ALTER TABLE appearances ADD COLUMN status TEXT DEFAULT 'scheduled'")
 
         # Migrate notification_settings table
         ns_cols = {row[1] for row in conn.execute("PRAGMA table_info(notification_settings)").fetchall()}
