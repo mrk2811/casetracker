@@ -549,11 +549,12 @@ class NYWebCivilAdapter(CourtAdapter):
 
         # Check for hCaptcha intercept page
         if result.html and _detect_captcha_intercept(result.html):
+            sitekey = _detect_hcaptcha_in_response(result.html) or _HCAPTCHA_SITEKEY
             logger.warning(
                 "WebCivil Supreme returned hCaptcha intercept page — "
-                "search blocked by IP reputation"
+                "raising CaptchaRequiredError (sitekey=%s)", sitekey
             )
-            return []
+            raise CaptchaRequiredError(sitekey=sitekey)
 
         return self._parse_search_results(result.soup, params)
 
@@ -600,18 +601,19 @@ class NYWebCivilAdapter(CourtAdapter):
                 url=f"{BASE_URL_SUPREME}/FCASSearch", data=post_data
             )
 
-            # Detect hCaptcha intercept
+            # Detect hCaptcha intercept — raise so the router can prompt
+            # the user to solve the captcha.
             if result.success and result.html and _detect_captcha_intercept(result.html):
-                logger.warning("Browser fallback (Supreme): hCaptcha intercept detected")
-                return ScrapeResult(
-                    success=False,
-                    html=result.html,
-                    status_code=result.status_code,
-                    error_message="hCaptcha intercept — search blocked by server",
-                    captcha_detected=True,
+                sitekey = _detect_hcaptcha_in_response(result.html) or _HCAPTCHA_SITEKEY
+                logger.warning(
+                    "Browser fallback (Supreme): hCaptcha intercept detected — "
+                    "raising CaptchaRequiredError (sitekey=%s)", sitekey
                 )
+                raise CaptchaRequiredError(sitekey=sitekey)
 
             return result
+        except CaptchaRequiredError:
+            raise
         except Exception as exc:
             logger.error("Browser fallback failed for Supreme index search: %s", exc)
             return ScrapeResult(
@@ -686,6 +688,8 @@ class NYWebCivilAdapter(CourtAdapter):
                     "httpx request failed (%s), retrying Local search with browser",
                     result.error_message,
                 )
+                # _browser_search_local_index raises CaptchaRequiredError
+                # if hCaptcha is detected, so no need to check here.
                 result = await self._browser_search_local_index(
                     params, form_data, parsed
                 )
@@ -755,18 +759,29 @@ class NYWebCivilAdapter(CourtAdapter):
                 url=f"{BASE_URL_LOCAL}/LCSearch", data=form_data
             )
 
-            # Detect hCaptcha intercept
+            # Detect hCaptcha intercept — raise immediately so the router
+            # can prompt the user to solve the captcha.
             if result.success and result.html and _detect_captcha_intercept(result.html):
-                logger.warning("Browser fallback (Local): hCaptcha intercept detected")
-                return ScrapeResult(
-                    success=False,
-                    html=result.html,
-                    status_code=result.status_code,
-                    error_message="hCaptcha intercept — search blocked by server",
-                    captcha_detected=True,
+                sitekey = _detect_hcaptcha_in_response(result.html) or _HCAPTCHA_SITEKEY
+                logger.warning(
+                    "Browser fallback (Local): hCaptcha intercept detected — "
+                    "raising CaptchaRequiredError (sitekey=%s)", sitekey
                 )
+                raise CaptchaRequiredError(sitekey=sitekey)
+
+            # Also check for invisible hCaptcha (form returned instead of results)
+            if result.success and result.html:
+                sitekey = _detect_hcaptcha_in_response(result.html)
+                if sitekey and "LCCaseInfo" not in result.html:
+                    logger.warning(
+                        "Browser fallback (Local): invisible hCaptcha detected — "
+                        "raising CaptchaRequiredError (sitekey=%s)", sitekey
+                    )
+                    raise CaptchaRequiredError(sitekey=sitekey)
 
             return result
+        except CaptchaRequiredError:
+            raise  # Let captcha errors propagate to the router
         except Exception as exc:
             logger.error("Browser fallback failed for Local index search: %s", exc)
             return ScrapeResult(
