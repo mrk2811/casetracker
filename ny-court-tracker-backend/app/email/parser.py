@@ -445,9 +445,10 @@ def parse_multi_case_email(
     events = []
     for idx_num in all_indices:
         # Find the section around this index number
+        # Match both "Index No. XXX" and "Case XXX" formats
         pattern = re.compile(
-            rf"(?:Index\s*(?:No\.?|Number|#)\s*[:.]?\s*{re.escape(idx_num)})"
-            r"([\s\S]*?)(?=Index\s*(?:No\.?|Number|#)|$)",
+            rf"(?:(?:Index\s*(?:No\.?|Number|#)|Case\s*#?)\s*[:.]?\s*{re.escape(idx_num)})"
+            r"([\s\S]*?)(?=(?:Index\s*(?:No\.?|Number|#)|Case\s*#?)\s*[:.]?\s*[A-Z0-9]|$)",
             re.IGNORECASE,
         )
         section_match = pattern.search(text)
