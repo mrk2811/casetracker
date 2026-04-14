@@ -1,7 +1,12 @@
 import axios from "axios";
 import { storage } from "./storage";
 
-const API_URL = "https://app-ujjdvsxl.fly.dev";
+const API_URL =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1")
+    ? "http://localhost:8000"
+    : "https://app-ujjdvsxl.fly.dev";
 
 const api = axios.create({
   baseURL: API_URL,
