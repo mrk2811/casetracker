@@ -69,6 +69,19 @@ class SearchParams:
     attorney_name: Optional[str] = None
     attorney_reg_number: Optional[str] = None
     state: str = "NY"
+    captcha_token: Optional[str] = None
+
+
+class CaptchaRequiredError(Exception):
+    """Raised when a court system requires the user to solve a CAPTCHA.
+
+    The adapter raises this instead of returning empty results so the
+    router can inform the frontend and prompt the user.
+    """
+
+    def __init__(self, sitekey: str, message: str = "CAPTCHA verification required"):
+        self.sitekey = sitekey
+        super().__init__(message)
 
 
 class CourtAdapter(ABC):

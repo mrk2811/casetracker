@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { casesApi, CaseSearchResult } from "../services/api";
@@ -79,6 +80,9 @@ export default function CaseFormScreen({ route, navigation }: any) {
   const [showVerification, setShowVerification] = useState(false);
   const [selectedResult, setSelectedResult] = useState<CaseSearchResult | null>(null);
 
+  // Captcha / WebCivil redirect flow state
+  const [showCaptchaRedirect, setShowCaptchaRedirect] = useState(false);
+
   useEffect(() => {
     if (isEditing) {
       setLoading(true);
@@ -120,6 +124,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
     setSearchResults([]);
     setSearchMessage(null);
     setSelectedResult(null);
+    setShowCaptchaRedirect(false);
     try {
       const courtSystem = getCourtSystem(form.court_type);
       const res = await casesApi.search({
@@ -128,6 +133,14 @@ export default function CaseFormScreen({ route, navigation }: any) {
         county: form.county,
         court_system: courtSystem,
       });
+
+      // Check if backend says captcha is required
+      if (res.data.captcha_required) {
+        setShowCaptchaRedirect(true);
+        setSearchMessage(res.data.message);
+        return;
+      }
+
       setSearchResults(res.data.results);
       setSearchMessage(res.data.message);
       setShowVerification(true);
@@ -137,6 +150,18 @@ export default function CaseFormScreen({ route, navigation }: any) {
     } finally {
       setSearching(false);
     }
+  };
+
+  const getWebCivilSearchUrl = (): string => {
+    // Build a direct link to the WebCivil search page based on court type
+    if (form.court_type === "local_civil") {
+      return "https://iapps.courts.state.ny.us/webcivilLocal/LCSearch?param=I";
+    }
+    return "https://iapps.courts.state.ny.us/webcivil/FCASSearch?param=I";
+  };
+
+  const handleOpenWebCivil = () => {
+    Linking.openURL(getWebCivilSearchUrl());
   };
 
   const handleSelectResult = (result: CaseSearchResult) => {
@@ -492,7 +517,7 @@ export default function CaseFormScreen({ route, navigation }: any) {
       {!isEditing && (
         <TouchableOpacity
           style={[styles.searchButton, searching && styles.buttonDisabled]}
-          onPress={handleSearch}
+          onPress={() => handleSearch()}
           disabled={searching}
         >
           {searching ? (
@@ -506,7 +531,54 @@ export default function CaseFormScreen({ route, navigation }: any) {
         </TouchableOpacity>
       )}
 
-      {!isEditing && (
+      {/* Captcha redirect — direct user to WebCivil */}
+      {showCaptchaRedirect && (
+        <View style={styles.captchaContainer}>
+          <View style={styles.captchaHeader}>
+            <Ionicons name="shield-checkmark-outline" size={20} color="#f59e0b" />
+            <Text style={styles.captchaTitle}>Human Verification Required</Text>
+          </View>
+          <Text style={styles.captchaSubtitle}>
+            The court website requires human verification that can only be
+            completed on their site. Please search directly on WebCivil and
+            then add the case manually below.
+          </Text>
+
+          <TouchableOpacity
+            style={styles.openWebCivilButton}
+            onPress={handleOpenWebCivil}
+          >
+            <Ionicons name="open-outline" size={16} color="#fff" />
+            <Text style={styles.openWebCivilButtonText}>
+              Open WebCivil Search
+            </Text>
+          </TouchableOpacity>
+
+          <View style={styles.captchaSteps}>
+            <Text style={styles.captchaStepText}>
+              1. Click the button above to open WebCivil
+            </Text>
+            <Text style={styles.captchaStepText}>
+              2. Search for your case ({form.index_number || "index number"})
+            </Text>
+            <Text style={styles.captchaStepText}>
+              3. Note the case details (parties, status, etc.)
+            </Text>
+            <Text style={styles.captchaStepText}>
+              4. Come back here and fill in the form below
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.dismissCaptchaButton}
+            onPress={() => setShowCaptchaRedirect(false)}
+          >
+            <Text style={styles.dismissCaptchaText}>Got it, I'll fill in manually</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!isEditing && !showCaptchaRedirect && (
         <Text style={styles.searchHint}>
           Search the court system to verify and auto-fill case details, or fill in manually below.
         </Text>
@@ -889,4 +961,64 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   manualButtonText: { color: "#374151", fontSize: 15, fontWeight: "500" },
+  captchaContainer: {
+    backgroundColor: "#fffbeb",
+    borderWidth: 1,
+    borderColor: "#fcd34d",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+  },
+  captchaHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  captchaTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#92400e",
+  },
+  captchaSubtitle: {
+    fontSize: 13,
+    color: "#78716c",
+    marginBottom: 12,
+  },
+  openWebCivilButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#2563eb",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+  },
+  openWebCivilButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  captchaSteps: {
+    backgroundColor: "#fef3c7",
+    borderRadius: 8,
+    padding: 12,
+    gap: 6,
+    marginBottom: 12,
+  },
+  captchaStepText: {
+    fontSize: 13,
+    color: "#78716c",
+  },
+  dismissCaptchaButton: {
+    alignItems: "center",
+    padding: 10,
+  },
+  dismissCaptchaText: {
+    fontSize: 14,
+    color: "#92400e",
+    fontWeight: "500",
+    textDecorationLine: "underline",
+  },
 });

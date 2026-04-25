@@ -9,6 +9,7 @@ from app.schemas import (
     CaseVerifyRequest, CaseEventOut,
 )
 from app.adapters.registry import get_adapter
+from app.adapters.base import CaptchaRequiredError
 
 router = APIRouter(prefix="/api/cases", tags=["cases"])
 
@@ -176,8 +177,19 @@ async def search_cases(
         index_number=data.index_number,
         court_type=data.court_type,
         county=data.county,
+        captcha_token=data.captcha_token,
     )
-    records = await adapter.search(params)
+
+    try:
+        records = await adapter.search(params)
+    except CaptchaRequiredError as exc:
+        return CaseSearchResponse(
+            results=[],
+            court_system=data.court_system,
+            message="Human verification required. Please complete the captcha below and retry.",
+            captcha_required=True,
+            captcha_sitekey=exc.sitekey,
+        )
 
     results = [
         CaseSearchResult(

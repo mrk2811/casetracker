@@ -1,7 +1,12 @@
 import axios from "axios";
 import { storage } from "./storage";
 
-const API_URL = "https://app-ujjdvsxl.fly.dev";
+const API_URL =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1")
+    ? "http://localhost:8000"
+    : "https://app-ujjdvsxl.fly.dev";
 
 const api = axios.create({
   baseURL: API_URL,
@@ -112,6 +117,8 @@ export interface CaseSearchResponse {
   results: CaseSearchResult[];
   court_system: string;
   message: string;
+  captcha_required?: boolean;
+  captcha_sitekey?: string;
 }
 
 export interface CourtConfig {
@@ -211,6 +218,7 @@ export const casesApi = {
     court_type: string;
     county: string;
     court_system?: string;
+    captcha_token?: string;
   }) => api.post<CaseSearchResponse>("/api/cases/search", data),
   verify: (data: Partial<Case> & { court_system?: string; search_params?: string }) =>
     api.post<Case>("/api/cases/verify", data),

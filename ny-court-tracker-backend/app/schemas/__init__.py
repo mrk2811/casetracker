@@ -126,6 +126,7 @@ class CaseSearchRequest(BaseModel):
     court_type: str
     county: str
     court_system: str = "ny_webcivil"
+    captcha_token: Optional[str] = None
 
 
 class CaseSearchResult(BaseModel):
@@ -151,6 +152,8 @@ class CaseSearchResponse(BaseModel):
     results: list[CaseSearchResult]
     court_system: str
     message: str
+    captcha_required: bool = False
+    captcha_sitekey: Optional[str] = None
 
 
 class CaseVerifyRequest(BaseModel):
