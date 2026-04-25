@@ -27,6 +27,8 @@ from app.adapters.base import (
 )
 from app.scraper.engine import ScraperEngine
 from app.scraper.browser_engine import BrowserEngine
+from app.scraper.browserless_engine import BrowserlessEngine
+from app.scraper.captcha_solver import CaptchaSolverEngine
 
 logger = logging.getLogger(__name__)
 
@@ -436,15 +438,23 @@ class NYWebCivilAdapter(CourtAdapter):
     2. Fallback — ``curl_cffi`` with browser TLS impersonation via
        :class:`BrowserEngine` when the primary request fails (Cloudflare
        challenge, CAPTCHA, HTTP 403).
+    3. Browserless — remote Chrome via :class:`BrowserlessEngine` with
+       automatic CAPTCHA solving when curl_cffi also fails (hCaptcha gate).
+    4. Captcha solver — :class:`CaptchaSolverEngine` uses a third-party
+       human-solver service (2Captcha/CapSolver) as a last resort.
 
     If the server responds with a Terms-of-Use / hCaptcha intercept page
-    (common for cloud/server IPs), the adapter returns an empty result set
-    with an appropriate log warning rather than silently failing.
+    (common for cloud/server IPs), the adapter first tries Browserless
+    (remote Chrome with built-in CAPTCHA solving). If Browserless also
+    fails (e.g. token rejected), it falls back to the captcha solver
+    service for guaranteed human-solved tokens.
     """
 
     def __init__(self) -> None:
         self._engine: Optional[ScraperEngine] = None
         self._browser_engine: Optional[BrowserEngine] = None
+        self._browserless_engine: Optional[BrowserlessEngine] = None
+        self._captcha_solver_engine: Optional[CaptchaSolverEngine] = None
 
     def _get_engine(self) -> ScraperEngine:
         if self._engine is None:
@@ -456,6 +466,18 @@ class NYWebCivilAdapter(CourtAdapter):
         if self._browser_engine is None:
             self._browser_engine = BrowserEngine()
         return self._browser_engine
+
+    def _get_browserless_engine(self) -> BrowserlessEngine:
+        """Lazily create the Browserless engine for CAPTCHA-protected scraping."""
+        if self._browserless_engine is None:
+            self._browserless_engine = BrowserlessEngine()
+        return self._browserless_engine
+
+    def _get_captcha_solver_engine(self) -> CaptchaSolverEngine:
+        """Lazily create the captcha solver engine for CAPTCHA-protected scraping."""
+        if self._captcha_solver_engine is None:
+            self._captcha_solver_engine = CaptchaSolverEngine()
+        return self._captcha_solver_engine
 
     def _should_fallback(self, result: "ScrapeResult") -> bool:
         """Decide whether to retry the request with the headless browser."""
@@ -547,14 +569,31 @@ class NYWebCivilAdapter(CourtAdapter):
         if not result.success or not result.soup:
             return []
 
-        # Check for hCaptcha intercept page
+        # Check for hCaptcha intercept page — try Browserless, then captcha solver
         if result.html and _detect_captcha_intercept(result.html):
-            sitekey = _detect_hcaptcha_in_response(result.html) or _HCAPTCHA_SITEKEY
-            logger.warning(
+            logger.info(
                 "WebCivil Supreme returned hCaptcha intercept page — "
-                "raising CaptchaRequiredError (sitekey=%s)", sitekey
+                "escalating to Browserless"
             )
-            raise CaptchaRequiredError(sitekey=sitekey)
+            county_value = None
+            if params.county:
+                county_value = _get_court_value(params.county)
+            bl_result = await self._browserless_search_supreme_index(
+                params.index_number or "", county_value
+            )
+            if bl_result.success and bl_result.soup:
+                return self._parse_search_results(bl_result.soup, params)
+            # Browserless failed — fall back to captcha solver
+            logger.info(
+                "Browserless failed for Supreme search — "
+                "falling back to captcha solver"
+            )
+            solver_result = await self._captcha_solver_search_supreme_index(
+                params.index_number or "", county_value
+            )
+            if solver_result.success and solver_result.soup:
+                return self._parse_search_results(solver_result.soup, params)
+            return []
 
         return self._parse_search_results(result.soup, params)
 
@@ -563,7 +602,12 @@ class NYWebCivilAdapter(CourtAdapter):
         params: SearchParams,
         form_data: dict[str, str],
     ) -> "ScrapeResult":
-        """Browser fallback for WebCivil Supreme index search."""
+        """Browser fallback for WebCivil Supreme index search.
+
+        Tries curl_cffi first, then escalates to Browserless (remote Chrome
+        with automatic CAPTCHA solving) if hCaptcha is detected. If Browserless
+        also fails, falls back to captcha solver (2Captcha/CapSolver).
+        """
         from app.scraper.engine import ScrapeResult
 
         browser = self._get_browser_engine()
@@ -581,7 +625,13 @@ class NYWebCivilAdapter(CourtAdapter):
                     "Browser fallback: could not load Supreme index form (HTTP %s)",
                     form_page.status_code,
                 )
-                return form_page
+                # curl_cffi couldn't load the form — try Browserless, then captcha solver
+                county_value = None
+                if params.county:
+                    county_value = _get_court_value(params.county)
+                return await self._browserless_or_solver_search_supreme(
+                    params.index_number or "", county_value
+                )
 
             post_data: dict[str, str] = {
                 "hWhichPage": "I",
@@ -601,25 +651,78 @@ class NYWebCivilAdapter(CourtAdapter):
                 url=f"{BASE_URL_SUPREME}/FCASSearch", data=post_data
             )
 
-            # Detect hCaptcha intercept — raise so the router can prompt
-            # the user to solve the captcha.
+            # Detect hCaptcha intercept — escalate to Browserless, then captcha solver
             if result.success and result.html and _detect_captcha_intercept(result.html):
-                sitekey = _detect_hcaptcha_in_response(result.html) or _HCAPTCHA_SITEKEY
-                logger.warning(
-                    "Browser fallback (Supreme): hCaptcha intercept detected — "
-                    "raising CaptchaRequiredError (sitekey=%s)", sitekey
+                logger.info(
+                    "curl_cffi hit hCaptcha for Supreme search — "
+                    "escalating to Browserless"
                 )
-                raise CaptchaRequiredError(sitekey=sitekey)
+                county_value = None
+                if params.county:
+                    county_value = _get_court_value(params.county)
+                return await self._browserless_or_solver_search_supreme(
+                    params.index_number or "", county_value
+                )
 
             return result
-        except CaptchaRequiredError:
-            raise
         except Exception as exc:
             logger.error("Browser fallback failed for Supreme index search: %s", exc)
-            return ScrapeResult(
-                success=False,
-                error_message=f"Browser fallback error: {exc}",
+            # Last resort: try Browserless, then captcha solver
+            county_value = None
+            if params.county:
+                county_value = _get_court_value(params.county)
+            return await self._browserless_or_solver_search_supreme(
+                params.index_number or "", county_value
             )
+
+    async def _browserless_search_supreme_index(
+        self,
+        index_number: str,
+        county_court_value: Optional[str] = None,
+    ) -> "ScrapeResult":
+        """Use Browserless remote Chrome to search Supreme with auto CAPTCHA solving."""
+        browserless = self._get_browserless_engine()
+        logger.info(
+            "Browserless fallback (Supreme): %s", index_number
+        )
+        return await browserless.search_supreme_by_index(
+            index_number=index_number,
+            county_court_value=county_court_value,
+        )
+
+    async def _captcha_solver_search_supreme_index(
+        self,
+        index_number: str,
+        county_court_value: Optional[str] = None,
+    ) -> "ScrapeResult":
+        """Use captcha solver (2Captcha/CapSolver) to search Supreme."""
+        solver = self._get_captcha_solver_engine()
+        logger.info(
+            "Captcha solver fallback (Supreme): %s", index_number
+        )
+        return await solver.search_supreme_by_index(
+            index_number=index_number,
+            county_court_value=county_court_value,
+        )
+
+    async def _browserless_or_solver_search_supreme(
+        self,
+        index_number: str,
+        county_court_value: Optional[str] = None,
+    ) -> "ScrapeResult":
+        """Try Browserless first, then fall back to captcha solver for Supreme."""
+        bl_result = await self._browserless_search_supreme_index(
+            index_number, county_court_value
+        )
+        if bl_result.success:
+            return bl_result
+        logger.info(
+            "Browserless failed for Supreme search — "
+            "falling back to captcha solver"
+        )
+        return await self._captcha_solver_search_supreme_index(
+            index_number, county_court_value
+        )
 
     # ------------------------------------------------------------------
     # Local Civil Court — index search
@@ -634,9 +737,9 @@ class NYWebCivilAdapter(CourtAdapter):
         ``h-captcha-response`` and ``g-recaptcha-response`` fields so that
         the server accepts the submission.
 
-        Raises :class:`CaptchaRequiredError` when hCaptcha blocks the search
-        and no token was supplied, allowing the router to ask the frontend
-        to present the hCaptcha widget to the user.
+        When hCaptcha blocks the search, escalates to the captcha solver
+        service for automatic CAPTCHA solving instead of requiring manual
+        user intervention.
         """
         parsed = _parse_local_index(params.index_number or "")
         if not parsed:
@@ -702,32 +805,30 @@ class NYWebCivilAdapter(CourtAdapter):
             return []
 
         # Check for hCaptcha intercept (server-side "I am human" page)
+        # or invisible hCaptcha — try Browserless, then captcha solver
+        captcha_blocked = False
         if result.html and _detect_captcha_intercept(result.html):
-            sitekey = _detect_hcaptcha_in_response(result.html) or _HCAPTCHA_SITEKEY
-            logger.warning(
+            logger.info(
                 "WebCivil Local returned hCaptcha intercept page — "
-                "raising CaptchaRequiredError (sitekey=%s)", sitekey
+                "escalating to Browserless"
             )
-            raise CaptchaRequiredError(sitekey=sitekey)
-
-        # Check for invisible hCaptcha in the response (form page returned
-        # instead of results because captcha token was missing/invalid)
-        if result.html:
+            captcha_blocked = True
+        elif result.html:
             sitekey = _detect_hcaptcha_in_response(result.html)
             if sitekey and "LCCaseInfo" not in result.html:
-                # Response contains hCaptcha markers but no case result links,
-                # meaning the server rejected the submission.
-                if not params.captcha_token:
-                    logger.warning(
-                        "WebCivil Local response contains hCaptcha "
-                        "(no token provided) — raising CaptchaRequiredError"
-                    )
-                    raise CaptchaRequiredError(sitekey=sitekey)
-                else:
-                    logger.warning(
-                        "WebCivil Local response still contains hCaptcha "
-                        "despite token — token may be expired or invalid"
-                    )
+                logger.info(
+                    "WebCivil Local response contains hCaptcha — "
+                    "escalating to Browserless"
+                )
+                captcha_blocked = True
+
+        if captcha_blocked:
+            fallback_result = await self._browserless_or_solver_search_local(parsed)
+            if fallback_result.success and fallback_result.soup:
+                return self._parse_search_results(
+                    fallback_result.soup, params, is_local=True
+                )
+            return []
 
         return self._parse_search_results(result.soup, params, is_local=True)
 
@@ -737,7 +838,12 @@ class NYWebCivilAdapter(CourtAdapter):
         form_data: dict[str, str],
         parsed: dict[str, str],
     ) -> "ScrapeResult":
-        """Browser fallback for WebCivil Local index search."""
+        """Browser fallback for WebCivil Local index search.
+
+        Tries curl_cffi first, then escalates to Browserless (remote Chrome
+        with automatic CAPTCHA solving) if hCaptcha is detected. If Browserless
+        also fails, falls back to captcha solver (2Captcha/CapSolver).
+        """
         from app.scraper.engine import ScrapeResult
 
         browser = self._get_browser_engine()
@@ -753,41 +859,84 @@ class NYWebCivilAdapter(CourtAdapter):
                     "Browser fallback: could not load Local index form (HTTP %s)",
                     form_page.status_code,
                 )
-                return form_page
+                # curl_cffi couldn't even load the form — try Browserless, then captcha solver
+                return await self._browserless_or_solver_search_local(parsed)
 
             result = await browser.post_form(
                 url=f"{BASE_URL_LOCAL}/LCSearch", data=form_data
             )
 
-            # Detect hCaptcha intercept — raise immediately so the router
-            # can prompt the user to solve the captcha.
+            # Detect hCaptcha intercept — escalate to Browserless, then captcha solver
+            captcha_blocked = False
             if result.success and result.html and _detect_captcha_intercept(result.html):
-                sitekey = _detect_hcaptcha_in_response(result.html) or _HCAPTCHA_SITEKEY
-                logger.warning(
-                    "Browser fallback (Local): hCaptcha intercept detected — "
-                    "raising CaptchaRequiredError (sitekey=%s)", sitekey
-                )
-                raise CaptchaRequiredError(sitekey=sitekey)
-
-            # Also check for invisible hCaptcha (form returned instead of results)
-            if result.success and result.html:
+                captcha_blocked = True
+            elif result.success and result.html:
                 sitekey = _detect_hcaptcha_in_response(result.html)
                 if sitekey and "LCCaseInfo" not in result.html:
-                    logger.warning(
-                        "Browser fallback (Local): invisible hCaptcha detected — "
-                        "raising CaptchaRequiredError (sitekey=%s)", sitekey
-                    )
-                    raise CaptchaRequiredError(sitekey=sitekey)
+                    captcha_blocked = True
+
+            if captcha_blocked:
+                logger.info(
+                    "curl_cffi hit hCaptcha for Local search — "
+                    "escalating to Browserless"
+                )
+                return await self._browserless_or_solver_search_local(parsed)
 
             return result
-        except CaptchaRequiredError:
-            raise  # Let captcha errors propagate to the router
         except Exception as exc:
             logger.error("Browser fallback failed for Local index search: %s", exc)
-            return ScrapeResult(
-                success=False,
-                error_message=f"Browser fallback error: {exc}",
-            )
+            # Last resort: try Browserless, then captcha solver
+            return await self._browserless_or_solver_search_local(parsed)
+
+    async def _browserless_search_local_index(
+        self,
+        parsed: dict[str, str],
+    ) -> "ScrapeResult":
+        """Use Browserless remote Chrome to search Local with auto CAPTCHA solving."""
+        browserless = self._get_browserless_engine()
+        logger.info(
+            "Browserless fallback (Local): %s-%s-%s/%s",
+            parsed["case_type"], parsed["number"],
+            parsed["year"], parsed["court"],
+        )
+        return await browserless.search_local_by_index(
+            case_type=parsed["case_type"],
+            number=parsed["number"],
+            year=parsed["year"],
+            court=parsed["court"],
+        )
+
+    async def _captcha_solver_search_local_index(
+        self,
+        parsed: dict[str, str],
+    ) -> "ScrapeResult":
+        """Use captcha solver (2Captcha/CapSolver) to search Local."""
+        solver = self._get_captcha_solver_engine()
+        logger.info(
+            "Captcha solver fallback (Local): %s-%s-%s/%s",
+            parsed["case_type"], parsed["number"],
+            parsed["year"], parsed["court"],
+        )
+        return await solver.search_local_by_index(
+            case_type=parsed["case_type"],
+            number=parsed["number"],
+            year=parsed["year"],
+            court=parsed["court"],
+        )
+
+    async def _browserless_or_solver_search_local(
+        self,
+        parsed: dict[str, str],
+    ) -> "ScrapeResult":
+        """Try Browserless first, then fall back to captcha solver for Local."""
+        bl_result = await self._browserless_search_local_index(parsed)
+        if bl_result.success:
+            return bl_result
+        logger.info(
+            "Browserless failed for Local search — "
+            "falling back to captcha solver"
+        )
+        return await self._captcha_solver_search_local_index(parsed)
 
     # ------------------------------------------------------------------
     # Party search (Supreme only for now)
