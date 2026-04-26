@@ -8,11 +8,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { authApi } from "../services/api";
+import { showAlert } from "../utils/alert";
 
 export default function ForgotPasswordScreen({ navigation }: any) {
   const [email, setEmail] = useState("");
@@ -21,7 +21,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
 
   const handleSubmit = async () => {
     if (!email) {
-      Alert.alert("Error", "Please enter your email address");
+      showAlert("Error", "Please enter your email address");
       return;
     }
     setLoading(true);
@@ -31,7 +31,7 @@ export default function ForgotPasswordScreen({ navigation }: any) {
     } catch (err: any) {
       const msg =
         err.response?.data?.detail || "Something went wrong. Please try again.";
-      Alert.alert("Error", msg);
+      showAlert("Error", msg);
     } finally {
       setLoading(false);
     }

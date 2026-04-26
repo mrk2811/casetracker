@@ -8,11 +8,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { authApi } from "../services/api";
+import { showAlert } from "../utils/alert";
 
 export default function ResetPasswordScreen({ navigation, route }: any) {
   const [token, setToken] = useState("");
@@ -24,19 +24,19 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
 
   const handleSubmit = async () => {
     if (!token) {
-      Alert.alert("Error", "Please enter the reset code from your email");
+      showAlert("Error", "Please enter the reset code from your email");
       return;
     }
     if (!newPassword) {
-      Alert.alert("Error", "Please enter a new password");
+      showAlert("Error", "Please enter a new password");
       return;
     }
     if (newPassword.length < 7) {
-      Alert.alert("Error", "Password must be at least 7 characters");
+      showAlert("Error", "Password must be at least 7 characters");
       return;
     }
     if (newPassword !== confirmPassword) {
-      Alert.alert("Error", "Passwords do not match");
+      showAlert("Error", "Passwords do not match");
       return;
     }
 
@@ -47,7 +47,7 @@ export default function ResetPasswordScreen({ navigation, route }: any) {
     } catch (err: any) {
       const msg =
         err.response?.data?.detail || "Failed to reset password. Please try again.";
-      Alert.alert("Error", msg);
+      showAlert("Error", msg);
     } finally {
       setLoading(false);
     }

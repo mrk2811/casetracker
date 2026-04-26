@@ -8,12 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
 import { authApi } from "../services/api";
+import { showAlert } from "../utils/alert";
 
 export default function RegisterScreen({ navigation }: any) {
   const { login } = useAuth();
@@ -29,15 +29,15 @@ export default function RegisterScreen({ navigation }: any) {
 
   const handleRegister = async () => {
     if (!form.first_name || !form.last_name || !form.email || !form.password) {
-      Alert.alert("Error", "Please fill in all required fields");
+      showAlert("Error", "Please fill in all required fields");
       return;
     }
     if (form.password.length < 7) {
-      Alert.alert("Error", "Password must be at least 7 characters");
+      showAlert("Error", "Password must be at least 7 characters");
       return;
     }
     if (form.password !== form.confirmPassword) {
-      Alert.alert("Error", "Passwords do not match");
+      showAlert("Error", "Passwords do not match");
       return;
     }
 
@@ -53,7 +53,7 @@ export default function RegisterScreen({ navigation }: any) {
       await login(res.data.access_token, res.data.user);
     } catch (err: any) {
       const msg = err.response?.data?.detail || "Registration failed";
-      Alert.alert("Registration Failed", msg);
+      showAlert("Registration Failed", msg);
     } finally {
       setLoading(false);
     }

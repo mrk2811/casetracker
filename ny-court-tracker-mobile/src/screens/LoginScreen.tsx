@@ -8,12 +8,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../context/AuthContext";
 import { authApi } from "../services/api";
+import { showAlert } from "../utils/alert";
 
 export default function LoginScreen({ navigation }: any) {
   const { login } = useAuth();
@@ -24,7 +24,7 @@ export default function LoginScreen({ navigation }: any) {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert("Error", "Please fill in all fields");
+      showAlert("Error", "Please fill in all fields");
       return;
     }
     setLoading(true);
@@ -33,7 +33,7 @@ export default function LoginScreen({ navigation }: any) {
       await login(res.data.access_token, res.data.user);
     } catch (err: any) {
       const msg = err.response?.data?.detail || "Login failed. Please try again.";
-      Alert.alert("Login Failed", msg);
+      showAlert("Login Failed", msg);
     } finally {
       setLoading(false);
     }
